@@ -1,8 +1,3 @@
-import {
-  randomNum,
-  newAb2Str
-} from '../utils/util.js'
-
 (function (g, f) {
   const e = typeof exports == 'object' ? exports : typeof g == 'object' ? g : {};
   f(e);
@@ -13,14 +8,47 @@ import {
 
   const ps1 = ">"
 
+  const newAb2Str = arrayBuffer => {
+    let unit8Arr = new Uint8Array(arrayBuffer);
+    let encodedString = String.fromCharCode.apply(null, unit8Arr),
+      decodedString = decodeURIComponent(escape((encodedString))); //没有这一步中文会乱码
+    return decodedString;
+  }
+
+  const randomNum = (lower, upper) => {
+    return Math.floor(Math.random() * (upper - lower)) + lower;
+  }
+
+  const getTimestamp = () => {
+    return new Date().getTime()
+  }
+
+  const pad = (num, n) => {
+    let str = String(num) || 0;
+    return Array(str.length >= n ? 0 : n - str.length + 1).join('0') + str;
+  }
+
   function Udper(port) {
     this.bport = port;
-    this.id = randomNum(9999, 99999)
-    this.create(port)
+    this.id = getTimestamp() + pad(randomNum(0, 256), 3)
+    this.online = {
+      t: 0
+    }
+    this._create(port)
     this.init()
   }
 
   exports.Udper = Udper;
+
+  Udper.prototype.MsgType = {
+    "0": "SYNC",
+    "1": "LOCAL",
+    "2": "TEXT",
+    "3": "FILE",
+    "4": "IMAGE",
+    "5": "audio",
+    "6": "VIDEO",
+  }
 
   Udper.prototype.init = function () {
     this.onClose()
@@ -32,16 +60,55 @@ import {
     this.offMessage()
   }
 
-  Udper.prototype.create = function (port) {
+  Udper.prototype._create = function (port) {
     this.udper = wx.createUDPSocket();
     this.udper.bind(port);
   }
 
-  Udper.prototype.send = function (ip, port, data) {
+  Udper.prototype.send = function (ip, port, mtype, data) {
     this.udper.send({
       address: ip,
       port: port,
-      message: this.id + ps1 + data
+      message: mtype + this.id + ps1 + data
+    })
+  }
+
+  Udper.prototype.sendById = function (id, mtype, data) {
+    let self = this
+    return new Promise((resolver, reject) => {
+      let info = self.getOthers(id)
+      if (info) {
+        this.udper.send({
+          address: info.address,
+          port: info.port,
+          message: mtype + self.id + ps1 + data
+        })
+        resolver({
+          peerId: id,
+          peerIp: info.address,
+          err: 'ok'
+        })
+      }
+      reject({
+        peerId: id,
+        err: 'fail'
+      })
+    })
+  }
+
+  Udper.prototype.sendByIp = function (ip, mtype, data) {
+    let self = this
+    return new Promise((resolver, reject) => {
+      this.udper.send({
+        address: ip,
+        port: self.port,
+        message: mtype + self.id + ps1 + data
+      })
+      resolver({
+        peerId: null,
+        peerIp: ip,
+        err: 'ok'
+      })
     })
   }
 
@@ -122,13 +189,38 @@ import {
   }
 
   Udper.prototype.onMessage = function () {
+    let self = this
     return new Promise((resolver, reject) => {
-      this.udper.onMessage(function (res) {
+      self.udper.onMessage(function (res) {
         console.log("onMessage: ", res)
-        resolver({
-          message: newAb2Str(res.message),
+        let res_msg = newAb2Str(res.message)
+        let msg_type = res_msg[0]
+        let data = {
+          message: res_msg.slice(1),
           LocalInfo: res.remoteInfo,
-        })
+          type: msg_type
+        }
+        switch (msg_type) {
+          case '0':
+            break;
+          case '1':
+            data.message = data.message.slice(0, -1)
+            self.online[data.message] = data.LocalInfo
+            // data.cur = self.online['t']++
+            break;
+          case '2':
+            break;
+          case '3':
+            break;
+          case '4':
+            break;
+          case '5':
+            break;
+          default:
+            break;
+        }
+        console.log("online", self.online)
+        resolver(data)
       })
     })
   }
@@ -148,7 +240,7 @@ import {
   Udper.prototype.getLocalip = function () {
     let self = this
     return new Promise((resolver, reject) => {
-      this.send('255.255.255.255', this.bport, '')
+      this.send('255.255.255.255', this.bport, '1', '')
       // 广播接收者
       this.onMessage().then(res => {
         let _id = parseInt(res.message)
@@ -161,5 +253,18 @@ import {
         }
       }).catch(e => {})
     })
+  }
+
+  Udper.prototype.getSelf = function () {
+    return this.online[this.id]
+  }
+
+  Udper.prototype.getOthers = function (id) {
+    if (id) {
+      return this.online[id]
+    }
+    let copy = Object.assign({}, this.online);
+    delete copy[this.id]
+    return copy
   }
 });

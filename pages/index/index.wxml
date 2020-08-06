@@ -6,8 +6,11 @@
 			<image bindtap="bindViewTap" class="userinfo-avatar" src="{{userInfo.avatarUrl}}" mode="cover"></image>
 			<text class="userinfo-nickname">{{userInfo.nickName}}</text>
 		</block>
-    <input></input>
+		<input></input>
 	</view>
+	<input type="number" placeholder="请输入对方id" style="padding:2rpx;margin:2rpx" bindblur="inputId" />
+	<input type="text" placeholder="请输入..." style="padding:2rpx;margin:2rpx" bindblur="inputMsg" />
+	<button bindtap="bindSend">发送</button>
 	<view class="usermotto">
 		<text class="user-motto">{{motto}}</text>
 	</view>

@@ -79,4 +79,20 @@ Page({
       console.log(e)
     })
   },
+  bindSend: function (e) {
+    let id = this.data.peerId
+    let ip = this.data.peerIp
+    let msg = this.data.msg
+    app.udper.sendById(id, '2', msg)
+  },
+  inputId: function (e) {
+    this.setData({
+      peerId: e.detail.value
+    })
+  },
+  inputMsg: function (e) {
+    this.setData({
+      msg: e.detail.value
+    })
+  }
 })
