@@ -1,10 +1,6 @@
 //index.js
 //获取应用实例
 const app = getApp()
-import {
-  randomNum,
-  newAb2Str
-} from '../../utils/util.js'
 
 Page({
   data: {
@@ -46,7 +42,6 @@ Page({
       })
     }
     app.udper.getLocalip().then(res => {
-      console.log(res)
       this.setData({
         motto: res.id + "@" + res.LocalInfo.address
       })
@@ -71,42 +66,17 @@ Page({
       icon: 'loading'
     });
     app.udper.getLocalip().then(res => {
-      console.log(res)
       this.setData({
         motto: res.id + "@" + res.LocalInfo.address
       })
-      wx.stopPullDownRefresh();
+      setTimeout(function () {
+        wx.stopPullDownRefresh();
+        wx.hideToast({
+          complete: (res) => {},
+        })
+      }, 1000)
     }).catch(e => {
       console.log(e)
     })
   },
-  getLocalip: function () {
-    let that = this
-    that.bport = BPORT
-    if (that.udper == null) {
-      that.id = randomNum(9999, 99999)
-      that.udper = wx.createUDPSocket();
-      that.udper.bind(that.bport);
-    }
-    that.udper.send({
-      address: '255.255.255.255',
-      port: that.bport,
-      message: that.id + ""
-    })
-    // 广播接收者   
-    that.udper.onMessage(function (res) {
-      console.log(res)
-      let res_message = newAb2Str(res.message)
-      console.log(res_message)
-      let _id = parseInt(res_message)
-      if (that.id == _id) {
-        that.LocalInfo = res.remoteInfo
-        that.setData({
-          motto: that.id + "@" + that.LocalInfo.address
-        })
-      } else {
-        console.log("error", res.message)
-      }
-    })
-  }
 })

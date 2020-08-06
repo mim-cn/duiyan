@@ -37,7 +37,10 @@ App({
     })
     this.udper = new Udper(BPORT)
   },
+  onError: function (msg) {
+    this.udper.close()
+  },
   globalData: {
     userInfo: null
-  },  
+  },
 })
