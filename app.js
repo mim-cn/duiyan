@@ -1,5 +1,6 @@
 //app.js
 const Udper = require('./libs/udp.js').Udper
+import event from './libs/event.js'
 const BPORT = 5328
 
 App({
@@ -46,7 +47,8 @@ App({
         }
       }
     })
-    this.udper = new Udper(BPORT)
+    this.event = event,
+    this.udper = new Udper(BPORT, this.event)
   },
   onError: function (msg) {
     console.error(msg)

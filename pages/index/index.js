@@ -41,16 +41,7 @@ Page({
         }
       })
     }
-    app.udper.getLocalip().then(res => {
-      this.setData({
-        motto: res.id + "@" + res.LocalInfo.address
-      })
-    }).catch(e => {
-      console.log(e)
-    })
-    app.udper.onMessage().then(res => {
-      console.log("onMessage", res)
-    })
+    this.onMessage("onMessage");
   },
   getUserInfo: function (e) {
     console.log(e)
@@ -65,19 +56,23 @@ Page({
       title: '加载中....',
       icon: 'loading'
     });
-    app.udper.getLocalip().then(res => {
-      this.setData({
-        motto: res.id + "@" + res.LocalInfo.address
-      })
-      setTimeout(function () {
-        wx.stopPullDownRefresh();
-        wx.hideToast({
-          complete: (res) => {},
-        })
-      }, 1000)
-    }).catch(e => {
-      console.log(e)
+    let res = app.udper.getLocalip()
+    this.setData({
+      motto: res.id + "@" + res.address
     })
+    setTimeout(function () {
+      wx.stopPullDownRefresh();
+      wx.hideToast({
+        complete: (res) => {},
+      })
+    }, 1000)
+
+  },
+  onSaveExitState() {
+    // if (app.udper) {
+    //   app.udper.close()
+    // }
+    console.log("--------------------------")
   },
   bindSend: function (e) {
     let id = this.data.peerId
@@ -93,6 +88,37 @@ Page({
   inputMsg: function (e) {
     this.setData({
       msg: e.detail.value
+    })
+  },
+  onMessage: function (etype) {
+    app.event.on(etype, this, function (res) {
+      console.log("event onMessage:", res)
+      let msg_type = res.type
+      switch (msg_type) {
+        case '0':
+          wx.showToast({
+            title: 'online: ' + res.online,
+          })
+          break;
+        case '1':
+          this.setData({
+            motto: res.id + "@" + res.LocalInfo.address
+          })
+          break;
+        case '2':
+          wx.showToast({
+            title: res.message,
+          })
+          break;
+        case '3':
+          break;
+        case '4':
+          break;
+        case '5':
+          break;
+        default:
+          break;
+      }
     })
   }
 })

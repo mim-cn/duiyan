@@ -1,5 +1,11 @@
 <!--index.wxml-->
+<cu-custom bgColor="bg-gradual-blue" isCustom="{{true}}">
+	<view slot="content">对眼</view>
+</cu-custom>
 <view class="container">
+	<view class="padding-bottom">
+		<text class="text-center text-xxl padding">{{motto}}</text>
+	</view>
 	<view class="userinfo">
 		<button wx:if="{{!hasUserInfo && canIUse}}" open-type="getUserInfo" bindgetuserinfo="getUserInfo"> 获取头像昵称 </button>
 		<block wx:else>
@@ -8,10 +14,17 @@
 		</block>
 		<input></input>
 	</view>
-	<input type="number" placeholder="请输入对方id" style="padding:2rpx;margin:2rpx" bindblur="inputId" />
-	<input type="text" placeholder="请输入..." style="padding:2rpx;margin:2rpx" bindblur="inputMsg" />
-	<button bindtap="bindSend">发送</button>
-	<view class="usermotto">
-		<text class="user-motto">{{motto}}</text>
+	<form>
+		<view class="cu-form-group">
+			<view class="title">ID：</view>
+			<input placeholder="请输入对方id" bindblur="inputId"></input>
+		</view>
+		<view class="cu-form-group margin-top-sm">
+			<view class="title">消息：</view>
+			<input placeholder="请输入..." bindblur="inputMsg"></input>
+		</view>
+	</form>
+	<view class="padding flex flex-direction">
+		<button class="cu-btn bg-green margin-tb-sm lg" bindtap="bindSend">发送</button>
 	</view>
 </view>
