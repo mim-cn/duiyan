@@ -58,7 +58,7 @@ Page({
     });
     let res = app.udper.getLocalip()
     this.setData({
-      motto: res.id + "@" + res.address
+      motto: res.id // + "@" + res.address
     })
     setTimeout(function () {
       wx.stopPullDownRefresh();
@@ -78,7 +78,13 @@ Page({
     let id = this.data.peerId
     let ip = this.data.peerIp
     let msg = this.data.msg
-    app.udper.sendById(id, '2', msg)
+    app.udper.sendById(id, '2', msg).then(res => {
+      console.log(res)
+    }).catch(e => {
+      wx.showToast({
+        title: e.err,
+      })
+    })
   },
   inputId: function (e) {
     this.setData({
@@ -95,26 +101,26 @@ Page({
       console.log("event onMessage:", res)
       let msg_type = res.type
       switch (msg_type) {
-        case '0':
+        case 0:
           wx.showToast({
             title: 'online: ' + res.online,
           })
           break;
-        case '1':
+        case 1:
           this.setData({
-            motto: res.id + "@" + res.LocalInfo.address
+            motto: res.id // + "@" + res.LocalInfo.address
           })
           break;
-        case '2':
+        case 2:
           wx.showToast({
             title: res.message,
           })
           break;
-        case '3':
+        case 3:
           break;
-        case '4':
+        case 4:
           break;
-        case '5':
+        case 5:
           break;
         default:
           break;

@@ -5,89 +5,13 @@
     define('udper', e);
   }
 })(this, function (exports) {
+  const utils = require('./utils')
+  const {
+    Messge
+  } = require("./message");
 
-  const ps1 = ">"
-  const IDLEN = 4
-  const regexIP = /\b((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/;
-  /**
-   * Parses IPv4 to Integer
-   * @param  {String}   ip  [valid IPv4 string]
-   * @return {Integer}      [Integer value of IPv4 provided]
-   */
-  const toInt = (ip) => {
-    if (!ip) {
-      throw new Error('E_UNDEFINED_IP');
-    }
-
-    if (!regexIP.test(ip)) {
-      throw new Error('E_INVALID_IP');
-    }
-
-    /*
-      String value 189.170.79.173
-      Integer	3182055341
-      To convert an IP address to integer, break it into four octets.
-      For example, the ip address you provided can be broken into
-      First Octet:	189
-      Second Octet:	170
-      Third Octet:	79
-      Fourth Octet:	173
-      To calculate the decimal address from a dotted string, perform the following calculation.
-      = (first octet * 256³) + (second octet * 256²) + (third octet * 256) + (fourth octet)
-      =	(first octet * 16777216) + (second octet * 65536) + (third octet * 256) + (fourth octet)
-      =	(189 * 16777216) + (170 * 65536) + (79 * 256) + (173)
-      =	3182055341
-      Reference http://www.aboutmyip.com/AboutMyXApp/IP2Integer.jsp
-    */
-    return ip.split('.').map((octet, index, array) => {
-      return parseInt(octet) * Math.pow(256, (array.length - index - 1));
-    }).reduce((prev, curr) => {
-      return prev + curr;
-    });
-  }
-
-  /**
-   * Parses Integer to IPv4
-   *
-   * @param  {String} value [value to parse]
-   * @return {String}       [IPv4 String of value provided]
-   */
-  const toIp = (value) => {
-    if (!value) {
-      throw new Error('E_UNDEFINED_INTEGER');
-    }
-    const result = /\d+/.exec(value);
-    if (!result) {
-      throw new Error('E_INTEGER_NOT_FOUND');
-    }
-    value = result[0];
-    return [
-      (value >> 24) & 0xff,
-      (value >> 16) & 0xff,
-      (value >> 8) & 0xff,
-      value & 0xff
-    ].join('.');
-  }
-
-  const newAb2Str = arrayBuffer => {
-    let unit8Arr = new Uint8Array(arrayBuffer);
-    let encodedString = String.fromCharCode.apply(null, unit8Arr),
-      decodedString = decodeURIComponent(escape((encodedString))); //没有这一步中文会乱码
-    return decodedString;
-  }
-
-  const randomNum = (lower, upper) => {
-    return Math.floor(Math.random() * (upper - lower)) + lower;
-  }
-
-  const getTimestamp = () => {
-    return new Date().getTime()
-  }
-
-  const pad = (num, n) => {
-    let str = String(num) || 0;
-    return Array(str.length >= n ? 0 : n - str.length + 1).join('0') + str;
-  }
+  const IDLEN = 5
+  const IDMAX = Math.pow(10, IDLEN)
 
   const getId = () => {
     let id = null
@@ -96,7 +20,7 @@
       if (res) {
         id = res.id
       } else {
-        id = pad(randomNum(0, 5001), IDLEN)
+        id = utils.randomNum(0, IDMAX)
         wx.setStorage({
           data: {
             id: id
@@ -105,7 +29,7 @@
         })
       }
     } catch (e) {
-      id = pad(randomNum(0, 5001), IDLEN)
+      id = utils.randomNum(0, IDMAX)
       wx.setStorage({
         data: {
           id: id
@@ -113,12 +37,14 @@
         key: 'LOCAL',
       })
     }
+    id = utils.pad(id, IDLEN)
     return id
   }
 
+
   function Udper(port, event) {
     this.bport = port;
-    this.seq = getTimestamp()
+    this.seq = utils.getTimestamp()
     this.id = getId()
     this.event = event
     this.online = {
@@ -142,16 +68,14 @@
 
   Udper.prototype.init = function () {
     if (!this.getSelf()) {
-      this.send('255.255.255.255', this.bport, '1', '')
+      this.send('255.255.255.255', this.bport, 1, '')
     }
-    this.onClose()
-    this.offClose()
-    this.onError()
-    this.offError()
     this.onListening()
     this.offListening()
     this.onMessage()
     this.offMessage()
+    this.onClose()
+    this.offClose()
   }
 
   Udper.prototype._create = function (port) {
@@ -163,66 +87,84 @@
     }
   }
 
+  /**
+   * 向某个ip:port发送消息
+   * @param {String} ip 
+   * @param {Number} port 
+   * @param {Number} mtype 
+   * @param {String} data 
+   */
   Udper.prototype.send = function (ip, port, mtype, data) {
-    if (!this.MsgType[mtype]) {
-      throw new Error("invalid message type: " + mtype)
-    }
-    this.udper.send({
-      address: ip,
-      port: port,
-      message: mtype + this.id + ps1 + data
-    })
-  }
-
-  Udper.prototype.sendById = function (id, mtype, data) {
-    let self = this
     return new Promise((resolver, reject) => {
-      let info = self.getOthers(id) || []
-      if (info) {
-        info.map(function (each, index, array) {
-          self.send(each.address, each.port, mtype, data)
-        })
-        console.log("sendById resolver:", id, info)
-        resolver({
-          peerId: id,
-          peerIp: info.address,
-          err: 'ok'
-        })
-      } else {
-        console.log("sendById reject:", id, info)
+      if (!this.MsgType[mtype]) {
         reject({
-          peerId: id,
-          err: 'fail'
+          peerIp: ip,
+          peerPort: port,
+          err: 'INVALID MESSAGE TYPE: ' + mtype
         })
       }
-    })
-  }
-
-  Udper.prototype.sendByIp = function (ip, mtype, data) {
-    let self = this
-    return new Promise((resolver, reject) => {
-      self.send(ip, self.bport, mtype, data)
+      let msg = new Messge()
+      msg.writeNumber(mtype, 1) // 消息类型，1byte
+      msg.writeNumber(mtype, 4) // 消息数据包序号 4byte      
+      msg.writeNumber(this.id, 2) // 发送端id  2byte
+      msg.writeString(data) // 消息内容
+      console.log(msg)
+      this.udper.send({
+        address: ip,
+        port: port,
+        message: msg.buffer
+      })
       resolver({
-        peerId: null,
         peerIp: ip,
+        peerPort: port,
         err: 'ok'
       })
     })
   }
 
+  /**
+   * 通过id发送消息
+   * @param {Number} id 
+   * @param {Number} mtype 
+   * @param {String} data 
+   */
+  Udper.prototype.sendById = function (id, mtype, data) {
+    let self = this
+    return new Promise((resolver, reject) => {
+      let info = self.getOthers(id) || []
+      if (info && info.length > 0) {
+        let ress = []
+        info.map(function (each) {
+          self.send(each.address, each.port, mtype, data).then(res => {
+            ress.push(res)
+          }).catch(e => {
+            reject(e)
+          })
+        })
+        console.log("sendById resolver:", id, info, ress)
+        resolver(ress)
+      } else {
+        console.log("sendById reject:", id, info)
+        reject({
+          peerId: id,
+          err: 'NOT FOUND ID: ' + id
+        })
+      }
+    })
+  }
+
   Udper.prototype.close = function () {
     // 下线广播
-    this.send('255.255.255.255', this.bport, '0', '-' + this.id)
-    this.upper.close()
+    return this.send('255.255.255.255', this.bport, '0', '-' + this.id)
+    // this.upper.close()
   };
 
   Udper.prototype.onClose = function () {
-    console.log("onClose:")
-    return new Promise((resolver, reject) => {
+    return new Promise((resolver) => {
       this.udper.onClose(function (res) {
         console.log("onClose: ", res)
         resolver({
-          message: newAb2Str(res.message),
+          message: utils.newAb2Str(res.message),
           LocalInfo: res.remoteInfo,
         })
       })
@@ -230,12 +172,11 @@
   }
 
   Udper.prototype.offClose = function () {
-    console.log("offClose:")
-    return new Promise((resolver, reject) => {
+    return new Promise((resolver) => {
       this.udper.offClose(function (res) {
         console.log("offClose: ", res)
         resolver({
-          message: newAb2Str(res.message),
+          message: utils.newAb2Str(res.message),
           LocalInfo: res.remoteInfo,
         })
       })
@@ -243,12 +184,11 @@
   }
 
   Udper.prototype.onError = function () {
-    console.log("onError:")
-    return new Promise((resolver, reject) => {
+    return new Promise((resolver) => {
       this.udper.onError(function (res) {
         console.log("onError: ", res)
         resolver({
-          message: newAb2Str(res.message),
+          message: utils.newAb2Str(res.message),
           LocalInfo: res.remoteInfo,
         })
       })
@@ -256,12 +196,11 @@
   }
 
   Udper.prototype.offError = function () {
-    console.log("offError:")
-    return new Promise((resolver, reject) => {
+    return new Promise((resolver) => {
       this.udper.offError(function (res) {
         console.log("offError: ", res)
         resolver({
-          message: newAb2Str(res.message),
+          message: utils.newAb2Str(res.message),
           LocalInfo: res.remoteInfo,
         })
       })
@@ -269,12 +208,10 @@
   }
 
   Udper.prototype.onListening = function () {
-    console.log("onListening:")
-    return new Promise((resolver, reject) => {
+    return new Promise((resolver) => {
       this.udper.onListening(function (res) {
-        console.log("onListening: ", res)
         resolver({
-          message: newAb2Str(res.message),
+          message: utils.newAb2Str(res.message),
           LocalInfo: res.remoteInfo,
         })
       })
@@ -282,12 +219,13 @@
   }
 
   Udper.prototype.offListening = function () {
-    console.log("offListening:")
-    return new Promise((resolver, reject) => {
+    let self = this
+    return new Promise((resolver) => {
       this.udper.offListening(function (res) {
-        console.log("offListening: ", res)
+        self.onError()
+        self.offError()
         resolver({
-          message: newAb2Str(res.message),
+          message: utils.newAb2Str(res.message),
           LocalInfo: res.remoteInfo,
         })
       })
@@ -295,23 +233,46 @@
   }
 
   /**
+   * 添加上线用户
+   * @param {Number} id 
+   * @param {String} address 
+   * @param {Number} port 
+   */
+  Udper.prototype.addOnline = function (id, address, port) {
+    this.online[id] = {
+      address: address,
+      port: port
+    }
+    this.online.length++;
+    console.log("sync +++: ", this.online[id])
+    return this.online[id]
+  }
+
+  /**
+   * 删除下线用户
+   * @param {Number} id 
+   */
+  Udper.prototype.delOnline = function (id) {
+    let out = this.online[id]
+    delete this.online[id]
+    this.online.length--
+    console.log("sync --: ", out)
+    return out
+  }
+
+  /**
    * 处理设备上下线，各设备之间数据同步的功能
    * @param {*} data 
    */
   Udper.prototype._handleSync = function (data) {
-    // 接受同步的所有在线用户
     let method = data.message[0]
     data.message = data.message.slice(1)
     switch (method) {
       case '+':
-        this.online[data.message] = data.LocalInfo
-        this.online.length++
-        console.log("sync +++: ", data)
+        this.addOnline(data.message, data.LocalInfo.address, data.LocalInfo.port)
         break;
       case '-':
-        delete this.online[data.message]
-        this.online.length--
-        console.log("sync --: ", data)
+        this.delOnline(data.message)
         break;
       default:
         break;
@@ -323,12 +284,11 @@
 
   /**
    * 处理设备ip地址获取的功能
-   * @param {*} data 
+   * @param {Object} data 
    */
   Udper.prototype._handleLocal = function (data) {
     // 此时message 是当前上线的用户id
-    this.online[data.peerId] = data.LocalInfo
-    this.online.length++
+    this.addOnline(data.peerId, data.LocalInfo.address, data.LocalInfo.port)
     // 如果是本设备
     if (data.peerId == this.id) {
       data.id = this.id
@@ -339,44 +299,47 @@
     }
   }
 
+  /**
+   * 接受数据时的回调
+   */
   Udper.prototype.onMessage = function () {
     let self = this
     self.udper.onMessage(function (res) {
-      console.log("onMessage: ", res)
-      let res_msg = newAb2Str(res.message)
-      let msg_type = res_msg[0]
-      let peerId = res_msg.slice(1, ps1.length + IDLEN)
-      let message = res_msg.slice(ps1.length + IDLEN + 1)
+      // console.log("onMessage: ", res)
+      let msg = new Messge(res.message)
+      let msg_type = msg.readNumber(1) // 消息类型 1byte
+      let seqid = msg.readNumber(4) // 消息数据包序号 4byte      
+      let peerId = utils.pad(msg.readNumber(2), IDLEN) // 发送方id 2byte
+      let message = msg.readString() // 消息内容
       let data = {
-        reqid: getTimestamp() + randomNum(0, 10000),
+        reqid: seqid,
         peerId: peerId,
         message: message,
         LocalInfo: res.remoteInfo,
-        iPint: toInt(res.remoteInfo.address),
+        iPint: utils.ip2Int(res.remoteInfo.address),
       }
       switch (msg_type) {
-        case '0':
+        case 0:
           data.type = msg_type
           self._handleSync(data)
           break;
-        case '1':
+        case 1:
           data.type = msg_type
           self._handleLocal(data)
           break;
-        case '2':
-          data.type = msg_type
-          // 接受同步的所有在线用户
-          self.event.emit("onMessage", data)
-          break;
-        case '3':
+        case 2:
           data.type = msg_type
           self.event.emit("onMessage", data)
           break;
-        case '4':
+        case 3:
           data.type = msg_type
           self.event.emit("onMessage", data)
           break;
-        case '5':
+        case 4:
+          data.type = msg_type
+          self.event.emit("onMessage", data)
+          break;
+        case 5:
           data.type = msg_type
           self.event.emit("onMessage", data)
           break;
@@ -391,18 +354,20 @@
   }
 
   Udper.prototype.offMessage = function () {
-    console.log("offMessage:")
-    return new Promise((resolver, reject) => {
-      this.udper.offMessage(function (res) {
+    return new Promise(() => {
+      this.udper.offMessage(function () {
         // console.log("offMessage: ", res)
-        resolver({
-          message: newAb2Str(res.message),
-          LocalInfo: res.remoteInfo,
-        })
+        // resolver({
+        //   message: utils.newAb2Str(res.message),
+        //   LocalInfo: res.remoteInfo,
+        // })
       })
     })
   }
 
+  /**
+   * 获取最新的本设备的ip
+   */
   Udper.prototype.getLocalip = function () {
     let copy = Object.assign({
       id: this.id
@@ -410,22 +375,34 @@
     return copy
   }
 
+  /**
+   * 向某一个设备发送同步类型的数据，主要是同步本设备的数据更新
+   * @param {*} id 
+   * @param {*} msg 
+   */
   Udper.prototype.sync = function (id, msg) {
     return this.sendById(id, '0', msg)
   }
 
+  /**
+   * 获取本设备信息
+   */
   Udper.prototype.getSelf = function () {
     return this.online[this.id]
   }
 
+  /**
+   * 获取除本设备的其他所有设备
+   * @param {Number} id 
+   */
   Udper.prototype.getOthers = function (id) {
     if (id) {
-      return [this.online[id]]
+      return this.online[id] ? [this.online[id]] : null
     }
     let online = []
     let copy = Object.assign({}, this.online);
     for (let prop in copy) {
-      if (prop != 'length' && prop != this.id) {
+      if (prop != 'length' /* && prop != this.id*/ ) {
         online.push(copy[prop])
       }
     }

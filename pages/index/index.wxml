@@ -1,10 +1,10 @@
 <!--index.wxml-->
-<cu-custom bgColor="bg-gradual-blue" isCustom="{{true}}">
+<cu-custom bgColor="bg-gradual-blue" isCustom="{{true}}" Left="list" Right="info">
 	<view slot="content">对眼</view>
 </cu-custom>
 <view class="container">
 	<view class="padding-bottom">
-		<text class="text-center text-xxl padding">{{motto}}</text>
+		<text class="text-center text-sl padding">{{motto}}</text>
 	</view>
 	<view class="userinfo">
 		<button wx:if="{{!hasUserInfo && canIUse}}" open-type="getUserInfo" bindgetuserinfo="getUserInfo"> 获取头像昵称 </button>

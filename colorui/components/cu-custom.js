@@ -15,6 +15,14 @@ Component({
       type: String,
       default: ''
     }, 
+    Left: {
+      type: [Boolean, String],
+      default: false
+    },
+    Right: {
+      type: [Boolean, String],
+      default: false
+    },
     isCustom: {
       type: [Boolean, String],
       default: false
