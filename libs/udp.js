@@ -12,6 +12,10 @@
 
   const IDLEN = 5
   const IDMAX = Math.pow(10, IDLEN)
+  const TYPE_SIZE = 1
+  const ID_SIZE = 2
+  const SEQ_SIZE = 4
+  const HEADL_SIZE = TYPE_SIZE + ID_SIZE + SEQ_SIZE
 
   const getId = () => {
     let id = null
@@ -103,7 +107,8 @@
           err: 'INVALID MESSAGE TYPE: ' + mtype
         })
       }
-      let msg = new Messge()
+      let msg_size = HEADL_SIZE + data.length
+      let msg = new Messge(msg_size)
       msg.writeNumber(mtype, 1) // 消息类型，1byte
       msg.writeNumber(mtype, 4) // 消息数据包序号 4byte      
       msg.writeNumber(this.id, 2) // 发送端id  2byte
