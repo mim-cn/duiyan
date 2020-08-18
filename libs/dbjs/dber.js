@@ -13,7 +13,8 @@
   }
 })(this, function (exports) {
 
-  const lzw = require('./lzw.js')
+  const lzw = require('../lzw')
+  const indexTree = require('./tree').RBTree
 
   class Dber {
     constructor(db_name, engine) {
@@ -39,7 +40,7 @@
           this._load(this.db_id).then(res => {
             console.log(res)
           }).catch(e => {
-            console.log(res)
+            console.log(e)
           })
           this.commit();
           this.db_new = true;
@@ -165,12 +166,16 @@
     }
 
     // create a table
-    _createTable(table_name, fields) {
+    _createTable(table_name, fields, indexfields) {
       this.db.tables[table_name] = {
         fields: fields,
         auto_increment: 1
       };
       this.db.data[table_name] = {};
+      this.db.indexes[table_name] = {};
+      for (var i = 0, len = indexfields.length; i < len; i++) {
+        this.db.indexes[table_name][indexfields[i]] = new indexTree(indexfields[i])
+      }
     }
 
     // drop a table
@@ -218,10 +223,51 @@
       return count;
     }
 
+    // add a table index
+    __addIndexes(table_name, ifeild, data, id) {
+      let exist = this.db.indexes[table_name][ifeild].find(data)
+      if (exist) {
+        (exist.other).push(id)
+        this.db.indexes[table_name][ifeild].insert(data, exist.other)
+      } else {
+        this.db.indexes[table_name][ifeild].insert(data, [id])
+      }
+    }
+
+    // del a table index
+    __delIndexes(table_name, ifeild, data) {
+      let exist = this.db.indexes[table_name][ifeild].find(data)
+      if (exist) {
+        if (exist.other.length > 1) {
+          exist.other = (exist.other).filter(d => d != data);
+          this.db.indexes[table_name][ifeild].insert(data, exist.other)
+        } else {
+          this.db.indexes[table_name][ifeild].remove(data)
+        }
+      }
+    }
+
+    // update a table index
+    __updateIndexes(table_name, ifeild, old_data, new_data, id) {
+      let exist = this.db.indexes[table_name][ifeild].find(old_data)
+      if (exist) {
+        // 覆盖insert
+        this.db.indexes[table_name][ifeild].insert(new_data, [id])
+      }
+    }
+
     // insert a new row
     _insert(table_name, data) {
       data.ID = this.db.tables[table_name].auto_increment;
       this.db.data[table_name][this.db.tables[table_name].auto_increment] = data;
+      // add indexes
+      for (var ifeild in this.db.indexes[table_name]) {
+        console.log(ifeild)
+        if (data[ifeild]) {
+          this.__addIndexes(table_name, ifeild, data[ifeild], this.db.tables[table_name].auto_increment)
+          // this.db.indexes[table_name][ifeild].insert(data[ifeild], this.db.tables[table_name].auto_increment)
+        }
+      }
       this.db.tables[table_name].auto_increment++;
       return data.ID;
     }
@@ -286,7 +332,7 @@
       } else if (limit) {
         results = results.slice(start, limit);
       }
-
+      console.log(results)
       return results;
     }
 
@@ -383,6 +429,12 @@
     _deleteRows(table_name, ids) {
       for (var i = 0; i < ids.length; i++) {
         if (this.db.data[table_name].hasOwnProperty(ids[i])) {
+          // remove indexes
+          let del_data = this.db.data[table_name][ids[i]]
+          for (var ifeild in this.db.indexes[table_name]) {
+            this.__delIndexes(table_name, ifeild, del_data[ifeild]);
+            // this.db.indexes[table_name][ifeild].remove(del_data[ifeild])
+          }
           delete this.db.data[table_name][ids[i]];
         }
       }
@@ -409,8 +461,15 @@
               new_data[field] = updated_data[field];
             }
           }
-
+          let old_data = this.db.data[table_name][ID]
           this.db.data[table_name][ID] = this._validFields(table_name, new_data);
+          // update indexes
+          for (var ifeild in this.db.indexes[table_name]) {
+            if (new_data[ifeild]) {
+              this.__updateIndexes(table_name, ifeild, old_data[ifeild], new_data[ifeild], ID)
+              // this.db.indexes[table_name][ifeild].update(old_data[ifeild], new_data[ifeild], ID)
+            }
+          }
           num++;
         }
       }
@@ -563,7 +622,7 @@
     }
 
     // create a table
-    createTable(table_name, fields) {
+    createTable(table_name, fields, indexfields) {
       var result = false;
       if (!this._validateName(table_name)) {
         this._error("The database name '" + table_name + "' contains invalid characters.");
@@ -583,19 +642,28 @@
           // cannot use indexOf due to <IE9 incompatibility
           // de-duplicate the field list
           var fields_literal = {};
-          for (var i = 0; i < fields.length; i++) {
+          for (var i = 0, len = fields.length; i < len; i++) {
             fields_literal[fields[i]] = true;
           }
           delete fields_literal['ID']; // ID is a reserved field name
 
           fields = ['ID'];
+          let fields_tb = {}
           for (var field in fields_literal) {
             if (fields_literal.hasOwnProperty(field)) {
+              fields_tb[field] = 1
               fields.push(field);
             }
           }
-
-          this._createTable(table_name, fields);
+          // index fields 
+          let indexfields2 = (indexfields || [])
+          indexfields = []
+          for (var i = 0, len = indexfields2.length; i < len; i++) {
+            if (1 === fields_tb[indexfields2[i]]) {
+              indexfields.push(indexfields2[i]);
+            }
+          }
+          this._createTable(table_name, fields, indexfields);
           result = true;
         } else {
           this._error("One or more field names in the table definition contains invalid characters");
@@ -606,7 +674,7 @@
     }
 
     // Create a table using array of Objects @ [{k:v,k:v},{k:v,k:v},etc]
-    createTableWithData(table_name, data) {
+    createTableWithData(table_name, data, indexfields) {
       if (typeof data !== 'object' || !data.length || data.length < 1) {
         this._error("Data supplied isn't in object form. Example: [{k:v,k:v},{k:v,k:v} ..]");
       }
@@ -614,7 +682,7 @@
       var fields = Object.keys(data[0]);
 
       // create the table
-      if (this.createTable(table_name, fields)) {
+      if (this.createTable(table_name, fields, indexfields)) {
         this.commit();
 
         // populate
@@ -795,5 +863,264 @@
     }
   }
 
+  function getTestDB() {
+    // Initialise. If the database doesn't exist, it is created
+    var db = new Dber("library");
+
+    // Check if the database was just created. Useful for initial database setup
+    if (db.isNew()) {
+      // create the "books" table
+      db.createTable("books", ["code", "title", "author", "year", "copies"], ["title", "author"]);
+      // insert some data
+      db.insert("books", {
+        code: "B001",
+        title: "Phantoms in the brain",
+        author: "Ramachandran",
+        year: 1999,
+        copies: 10
+      });
+      db.insert("books", {
+        code: "B002",
+        title: "The tell-tale brain",
+        author: "Ramachandran",
+        year: 2011,
+        copies: 10
+      });
+      db.insert("books", {
+        code: "B003",
+        title: "Freakonomics",
+        author: "Levitt and Dubner",
+        year: 2005,
+        copies: 10
+      });
+      db.insert("books", {
+        code: "B004",
+        title: "Predictably irrational",
+        author: "Ariely",
+        year: 2008,
+        copies: 10
+      });
+      db.insert("books", {
+        code: "B005",
+        title: "Tesla: Man out of time",
+        author: "Cheney",
+        year: 2001,
+        copies: 10
+      });
+      db.insert("books", {
+        code: "B006",
+        title: "Salmon fishing in the Yemen",
+        author: "Torday",
+        year: 2007,
+        copies: 10
+      });
+      db.insert("books", {
+        code: "B007",
+        title: "The user illusion",
+        author: "Norretranders",
+        year: 1999,
+        copies: 10
+      });
+      db.insert("books", {
+        code: "B008",
+        title: "Hubble: Window of the universe",
+        author: "Sparrow",
+        year: 2010,
+        copies: 10
+      });
+
+      // commit the database to localStorage
+      // all create/drop/insert/update/delete operations should be committed
+      db.commit();
+    }
+    // If database already exists, and want to alter existing tables
+    if (!(db.columnExists("books", "publication"))) {
+      db.alterTable("books", "publication", "McGraw-Hill Education");
+      db.commit(); // commit the deletions to localStorage
+    }
+
+    // Multiple columns can also added at once
+    if (!(db.columnExists("books", "publication") && db.columnExists("books", "ISBN"))) {
+      db.alterTable("books", ["publication", "ISBN"], {
+        publication: "McGraw-Hill Education",
+        ISBN: "85-359-0277-5"
+      });
+      db.commit(); // commit the deletions to localStorage
+    }
+
+    // simple select queries
+    db.queryAll("books", {
+      query: {
+        year: 2011
+      }
+    });
+    db.queryAll("books", {
+      query: {
+        year: 1999,
+        author: "Norretranders"
+      }
+    });
+
+    // select all books
+    db.queryAll("books");
+
+    // select all books published after 2003
+    db.queryAll("books", {
+      query: function (row) { // the callback function is applied to every row in the table
+        if (row.year > 2003) { // if it returns true, the row is selected
+          return true;
+        } else {
+          return false;
+        }
+      }
+    });
+
+    // select all books by Torday and Sparrow
+    db.queryAll("books", {
+      query: function (row) {
+        if (row.author == "Torday" || row.author == "Sparrow") {
+          return true;
+        } else {
+          return false;
+        }
+      },
+      limit: 5
+    });
+
+    // select 5 rows sorted in ascending order by author
+    db.queryAll("books", {
+      limit: 5,
+      sort: [
+        ["author", "ASC"]
+      ]
+    });
+
+    // select all rows first sorted in ascending order by author, and then, in descending, by year
+    db.queryAll("books", {
+      sort: [
+        ["author", "ASC"],
+        ["year", "DESC"]
+      ]
+    });
+
+    db.queryAll("books", {
+      query: {
+        "year": 2011
+      },
+      limit: 5,
+      sort: [
+        ["author", "ASC"]
+      ]
+    });
+
+    // or using query()'s positional arguments, which is a little messy (DEPRECATED)
+    db.query("books", null, null, null, [
+      ["author", "ASC"]
+    ]);
+    db.queryAll("books", {
+      distinct: ["year", "author"]
+    });
+    // query results are returned as arrays of object literals
+    // an ID field with the internal auto-incremented id of the row is also included
+    // thus, ID is a reserved field name
+
+    db.queryAll("books", {
+      query: {
+        author: "ramachandran"
+      }
+    });
+
+    /* results
+    [
+     {
+       ID: 1,
+       code: "B001",
+       title: "Phantoms in the brain",
+       author: "Ramachandran",
+       year: 1999,
+       copies: 10
+     },
+     {
+       ID: 2,
+       code: "B002",
+       title: "The tell-tale brain",
+       author: "Ramachandran",
+       year: 2011,
+       copies: 10
+     }
+    ]
+    */
+    // change the title of books published in 1999 to "Unknown"
+    db.update("books", {
+      year: 1999
+    }, function (row) {
+      row.title = "Unknown";
+
+      // the update callback function returns to the modified record
+      return row;
+    });
+
+    // add +5 copies to all books published after 2003
+    db.update("books",
+      function (row) { // select condition callback
+        if (row.year > 2003) {
+          return true;
+        } else {
+          return false;
+        }
+      },
+      function (row) { // update function
+        row.copies += 5;
+        return row;
+      }
+    );
+    // if there's a book with code B003, update it, or insert it as a new row
+    db.insertOrUpdate("books", {
+      code: 'B003'
+    }, {
+      code: "B003",
+      title: "Freakonomics",
+      author: "Levitt and Dubner",
+      year: 2005,
+      copies: 15
+    });
+    // delete all books published in 1999
+    db.deleteRows("books", {
+      year: 1999
+    });
+
+    // delete all books published before 2005
+    db.deleteRows("books", function (row) {
+      if (row.year < 2005) {
+        return true;
+      } else {
+        return false;
+      }
+    });
+    db.commit(); // commit the deletions to localStorage
+
+    // // 1
+    // let dress = await db._dump()
+    // // 2
+    // async function Dump() {
+    //   await db._dump()
+    // }
+    // let dsress = Dump()
+    // // 3
+
+    db._dump().then(res => {
+      console.log("dump ok:", res)
+    }).catch(e => {
+      console.log("dump fail:", e)
+    })
+
+    db._load(db.db_id).then(res => {
+      console.log("load ok:", res)
+    }).catch(e => {
+      console.log(e)
+    })
+  }
+
   exports.Dber = Dber;
+  exports.getTestDB = getTestDB;
 });
