@@ -1,0 +1,36 @@
+<template name="modal">
+	<view id="{{id || 'modal'}}" class="cu-modal drawer-modal justify-start {{show?'show':''}}" bindtap="hideModal">
+		<view class="cu-dialog basis-xl" catchtap style="top:{{CustomBar}}px;height:calc(100vh - {{CustomBar}}px)">
+			<scroll-view class="padding-xs" scroll-y scroll-with-animation style="height:100%">
+				<view class="cu-list menu-avatar">
+					<block wx:for="{{list}}" wx:key="index" mark:tindex="{{index}}" mark:route="list[{{index}}]">
+						<view class="cu-item solid-bottom" bindtap="clickItem">
+							<block>
+								<view wx:if="{{item.avatar}}" class="cu-avatar radius lg" style="background-image:url({{item.avatar}});"></view>
+								<view wx:else class="cu-avatar radius lg bg-{{item.color||'gradual-blue'}}">
+									<text wx:if="{{item.name}}">{{item.name[0]}}</text>
+									<text wx:else class="cuIcon-people"></text>
+								</view>
+							</block>
+							<view class="content">
+								<view>
+									<text class="text-cut">{{item.name}}</text>
+									<view wx:if="{{item.status}}" class="cu-tag round bg-orange sm">{{item.status}}</view>
+								</view>
+								<view class="text-gray text-sm flex">
+									<text class="text-cut">
+										<text class="{{status?'cuIcon-infofill text-red':''}} margin-right-xs"></text>{{item.content}}
+									</text>
+								</view>
+							</view>
+							<view class="action">
+								<view class="text-grey text-xs">{{item.time}}</view>
+								<view class="cu-tag round bg-red sm">{{item.tag}}</view>
+							</view>
+						</view>
+					</block>
+				</view>
+			</scroll-view>
+		</view>
+	</view>
+</template>

@@ -14,6 +14,7 @@ App({
         this.globalData.StatusBar = e.statusBarHeight;
         let capsule = wx.getMenuButtonBoundingClientRect();
         if (capsule) {
+          this.globalData.DiviceInfo = e;
           this.globalData.Custom = capsule;
           this.globalData.CustomBar = capsule.bottom + capsule.top - e.statusBarHeight;
         } else {
@@ -47,8 +48,14 @@ App({
         }
       }
     })
-    this.event = event,
+    this.event = event;
     this.udper = new Udper(BPORT, this.event)
+    wx.onAppShow((result) => {
+      console.log(result)
+    })
+    wx.onAppHide((res) => {
+      console.log(res)
+    })
   },
   onError: function (msg) {
     console.error(msg)

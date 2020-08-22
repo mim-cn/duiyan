@@ -15,9 +15,11 @@
 
   const lzw = require('../lzw')
   const indexTree = require('./tree').RBTree
+  const indexNode = require('./tree').rbNode
 
   class Dber {
     constructor(db_name, engine) {
+      let self = this
       this.db_prefix = 'db_'
       this.db_id = this.db_prefix + db_name
       this.db_new = false // this flag determines whether a new database was created during an object initialisation
@@ -28,7 +30,11 @@
       this.engine = engine
       // if the database doesn't exist, create it
       this.db = this._getEngine()
-      if (!(this.db && (this.db = JSON.parse(this.db)) && this.db.tables && this.db.data)) {
+      // this.ctx = JSON.parse(this.db)
+      // console.log(JSON.parse(this.db))
+      if (!(this.db && (this.db = JSON.parse(this.db, function (key, value) {
+          self.__dataReviver(this, value)
+        })) && this.db.tables && this.db.data)) {
         if (!this._validateName(db_name)) {
           this._error("The name '" + db_name + "' contains invalid characters");
         } else {
@@ -45,8 +51,24 @@
           this.commit();
           this.db_new = true;
         }
+      } else {
+        console.log(this.db)
       }
 
+    }
+
+    // 还原原型链
+    __dataReviver(self, value) {
+      // console.log(ctx, self, key, value)
+      // 判断是树，还原原型链
+      if (Object.keys(new indexTree()).toString() === Object.keys(self).toString()) {
+        self.__proto__ = indexTree.prototype
+      }
+      // 判断是节点，还原原型链
+      if (Object.keys(new indexNode()).toString() === Object.keys(self).toString()) {
+        self.__proto__ = indexNode.prototype
+      }
+      return value
     }
 
     // private methods
@@ -174,7 +196,11 @@
       this.db.data[table_name] = {};
       this.db.indexes[table_name] = {};
       for (var i = 0, len = indexfields.length; i < len; i++) {
-        this.db.indexes[table_name][indexfields[i]] = new indexTree(indexfields[i])
+        let {
+          indexfield,
+          type
+        } = this.__checkIndexType(indexfields[i])
+        this.db.indexes[table_name][indexfield] = new indexTree(indexfield, type)
       }
     }
 
@@ -224,36 +250,87 @@
     }
 
     // add a table index
-    __addIndexes(table_name, ifeild, data, id) {
-      let exist = this.db.indexes[table_name][ifeild].find(data)
-      if (exist) {
-        (exist.other).push(id)
-        this.db.indexes[table_name][ifeild].insert(data, exist.other)
+    __addIndexes(table_name, ifield, data, id) {
+      data = data.toLowerCase()
+      let index = this._indexes(table_name, ifield)
+      if (indexTree.prototype.isPrototypeOf(index)) {
+        let exist = this._indexes(table_name, ifield).find(data)
+        if (exist) {
+          if (index.type == "UNIQUE") {
+            this._error("Duplicate entry ‘" + data + "’ for key ‘UNIQUE’")
+          }
+          let other = (exist.other).push(id)
+          // 由于是引用，无需再次操作indexTree
+          // this._indexes(table_name, ifield).insert(data, other)
+        } else {
+          this._indexes(table_name, ifield).insert(data, [id])
+        }
       } else {
-        this.db.indexes[table_name][ifeild].insert(data, [id])
+        console.error("indexes is invalid" + table_name + "." + ifield)
       }
     }
 
     // del a table index
-    __delIndexes(table_name, ifeild, data) {
-      let exist = this.db.indexes[table_name][ifeild].find(data)
-      if (exist) {
-        if (exist.other.length > 1) {
-          exist.other = (exist.other).filter(d => d != data);
-          this.db.indexes[table_name][ifeild].insert(data, exist.other)
-        } else {
-          this.db.indexes[table_name][ifeild].remove(data)
+    __delIndexes(table_name, ifield, data, id) {
+      data = data.toLowerCase()
+      let index = this._indexes(table_name, ifield)
+      if (indexTree.prototype.isPrototypeOf(index)) {
+        let exist = this._indexes(table_name, ifield).find(data)
+        if (exist) {
+          if (exist.other.length > 1) {
+            exist.other = (exist.other).filter(d => d != id);
+            // 由于是引用，无需再次操作indexTree
+            // this._indexes(table_name, ifield).insert(data, exist.other)
+          } else {
+            this._indexes(table_name, ifield).remove(data)
+          }
         }
+      } else {
+        console.error("indexes is invalid" + table_name + "." + ifield)
       }
     }
 
     // update a table index
-    __updateIndexes(table_name, ifeild, old_data, new_data, id) {
-      let exist = this.db.indexes[table_name][ifeild].find(old_data)
-      if (exist) {
-        // 覆盖insert
-        this.db.indexes[table_name][ifeild].insert(new_data, [id])
+    __updateIndexes(table_name, ifield, old_data, new_data, ids) {
+      old_data = old_data.toLowerCase()
+      new_data = new_data.toLowerCase()
+      let index = this._indexes(table_name, ifield)
+      if (indexTree.prototype.isPrototypeOf(index)) {
+        let exist = this._indexes(table_name, ifield).find(old_data)
+        if (exist) {
+          // 删除老的数据索引，新增新的数据索引
+          this._indexes(table_name, ifield).update(data, new_data, ids)
+        }
+      } else {
+        console.error("indexes is invalid" + table_name + "." + ifield)
       }
+    }
+
+    // check index field type
+    __checkIndexType(indexfield) {
+      let type = indexfield[0]
+      switch (type) {
+        case '@':
+          type = 'UNIQUE';
+          indexfield = indexfield.slice(1)
+          break
+        case '#':
+          type = 'INDEX';
+          indexfield = indexfield.slice(1)
+          break;
+        default:
+          type = 'INDEX';
+          break;
+      }
+      return {
+        indexfield,
+        type
+      }
+    }
+
+    // indexes
+    _indexes(table_name, ifield) {
+      return ifield ? this.db.indexes[table_name][ifield] : this.db.indexes[table_name]
     }
 
     // insert a new row
@@ -261,11 +338,10 @@
       data.ID = this.db.tables[table_name].auto_increment;
       this.db.data[table_name][this.db.tables[table_name].auto_increment] = data;
       // add indexes
-      for (var ifeild in this.db.indexes[table_name]) {
-        console.log(ifeild)
-        if (data[ifeild]) {
-          this.__addIndexes(table_name, ifeild, data[ifeild], this.db.tables[table_name].auto_increment)
-          // this.db.indexes[table_name][ifeild].insert(data[ifeild], this.db.tables[table_name].auto_increment)
+      for (var ifield in this._indexes(table_name)) {
+        if (data[ifield]) {
+          this.__addIndexes(table_name, ifield, data[ifield], this.db.tables[table_name].auto_increment)
+          // this._indexes(table_name, ifield).insert(data[ifield], this.db.tables[table_name].auto_increment)
         }
       }
       this.db.tables[table_name].auto_increment++;
@@ -332,7 +408,7 @@
       } else if (limit) {
         results = results.slice(start, limit);
       }
-      console.log(results)
+      // console.log(results)
       return results;
     }
 
@@ -356,7 +432,7 @@
       var result_ids = [],
         exists = false,
         row = null;
-
+    
       // loop through all the records in the table, looking for matches
       for (var ID in this.db.data[table_name]) {
         if (!this.db.data[table_name].hasOwnProperty(ID)) {
@@ -394,7 +470,6 @@
     // select rows in a table by a function, returns the IDs of matches
     _queryByFunction(table_name, query_function) {
       var result_ids = [],
-        exists = false,
         row = null;
 
       // loop through all the records in the table, looking for matches
@@ -431,9 +506,9 @@
         if (this.db.data[table_name].hasOwnProperty(ids[i])) {
           // remove indexes
           let del_data = this.db.data[table_name][ids[i]]
-          for (var ifeild in this.db.indexes[table_name]) {
-            this.__delIndexes(table_name, ifeild, del_data[ifeild]);
-            // this.db.indexes[table_name][ifeild].remove(del_data[ifeild])
+          for (var ifield in this._indexes(table_name)) {
+            this.__delIndexes(table_name, ifield, del_data[ifield], ids[i]);
+            // this._indexes(table_name, ifield).remove(del_data[ifield])
           }
           delete this.db.data[table_name][ids[i]];
         }
@@ -446,6 +521,8 @@
       var ID = '',
         num = 0;
 
+      // 记录更新的索引字段
+      let update_ifield = {}
       for (var i = 0; i < ids.length; i++) {
         ID = ids[i];
 
@@ -454,23 +531,33 @@
         if (updated_data) {
           delete updated_data['ID']; // no updates possible to ID
 
-          var new_data = this.db.data[table_name][ID];
+          let old_data = this.db.data[table_name][ID]
+          var new_data = this._clone(old_data);
           // merge updated data with existing data
           for (var field in updated_data) {
             if (updated_data.hasOwnProperty(field)) {
               new_data[field] = updated_data[field];
             }
-          }
-          let old_data = this.db.data[table_name][ID]
-          this.db.data[table_name][ID] = this._validFields(table_name, new_data);
-          // update indexes
-          for (var ifeild in this.db.indexes[table_name]) {
-            if (new_data[ifeild]) {
-              this.__updateIndexes(table_name, ifeild, old_data[ifeild], new_data[ifeild], ID)
-              // this.db.indexes[table_name][ifeild].update(old_data[ifeild], new_data[ifeild], ID)
+            // 是索引字段，且数据发生变化，才更新索引
+            if (this._indexes(table_name, field) && new_data[field] !== old_data[field]) {
+              update_ifield[field] = update_ifield[field] || {}
+              update_ifield[field].old = (update_ifield[field].old || [])
+              update_ifield[field].old.push(old_data[field])
+              update_ifield[field].new = (update_ifield[field].new || [])
+              update_ifield[field].new.push(new_data[field])
+              update_ifield[field].ids = (update_ifield[field].ids || [])
+              update_ifield[field].ids.push(ID)
             }
           }
+          this.db.data[table_name][ID] = this._validFields(table_name, new_data);
           num++;
+        }
+      }
+      // update indexes
+      for (var ifield in update_ifield) {
+        for (var i in update_ifield[ifield].old) {
+          this.__delIndexes(table_name, ifield, update_ifield[ifield].old[i], update_ifield[ifield].ids[i])
+          this.__addIndexes(table_name, ifield, update_ifield[ifield].new[i], update_ifield[ifield].ids[i])
         }
       }
       return num;
@@ -499,7 +586,7 @@
 
     // validate db, table, field names (alpha-numeric only)
     _validateName(name) {
-      return name.toString().match(/[^a-z_0-9]/ig) ? false : true;
+      return name.toString().match(/[^a-z_0-9#@]/ig) ? false : true;
     }
 
     // given a data list, only retain valid fields in a table
@@ -539,7 +626,7 @@
       let metadata_path = (this.db_id || 'tmp') + '_metadb.dat'
       let dbdata = [db_path, this._serialize(this.db.data)]
       let metadata = [metadata_path, this._serialize(this.db.tables)]
-      return Promise.all([dbdata, metadata].map((item, index) => {
+      return Promise.all([dbdata, metadata].map((item) => {
         return new Promise(function (resolve, reject) {
           FileSystemManager.writeFile({
             filePath: wx.env.USER_DATA_PATH + '/' + item[0],
@@ -562,7 +649,7 @@
       const FileSystemManager = wx.getFileSystemManager()
       let db_path = (db_id || 'tmp') + '_db.dat'
       let metadata_path = (db_id || 'tmp') + '_metadb.dat'
-      return Promise.all([db_path, metadata_path].map((path, index) => {
+      return Promise.all([db_path, metadata_path].map((path) => {
         return new Promise(function (resolve, reject) {
           FileSystemManager.readFile({
             filePath: wx.env.USER_DATA_PATH + '/' + path,
@@ -579,6 +666,28 @@
           })
         });
       }));
+    }
+
+    // get data by ids
+    _getDataByIDs(table_name, ids) {
+      return (ids || []).map(ID => {
+        return this.db.data[table_name][ID]
+      });
+    }
+    // getDataByIndex
+    _getDataByIndex(table_name, ifield, indexdata) {
+      let index = this._indexes(table_name, ifield).findIter(indexdata)
+      return this._getDataByIDs(table_name, index.other())
+    }
+    // travel indexes
+    travelIndex(table_name) {
+      let self = this
+      let table_indexes = this._indexes(table_name) || {}
+      for (let index in table_indexes) {
+        table_indexes[index].each(function (d, o) {
+          console.log(d, self._getDataByIDs(table_name, o))
+        })
+      }
     }
 
     // commit the database to localStorage
@@ -659,7 +768,10 @@
           let indexfields2 = (indexfields || [])
           indexfields = []
           for (var i = 0, len = indexfields2.length; i < len; i++) {
-            if (1 === fields_tb[indexfields2[i]]) {
+            let {
+              indexfield
+            } = this.__checkIndexType(indexfields2[i])
+            if (1 === fields_tb[indexfield]) {
               indexfields.push(indexfields2[i]);
             }
           }
@@ -870,7 +982,7 @@
     // Check if the database was just created. Useful for initial database setup
     if (db.isNew()) {
       // create the "books" table
-      db.createTable("books", ["code", "title", "author", "year", "copies"], ["title", "author"]);
+      db.createTable("books", ["code", "title", "author", "year", "copies"], ["code", "author"]);
       // insert some data
       db.insert("books", {
         code: "B001",
@@ -901,6 +1013,13 @@
         copies: 10
       });
       db.insert("books", {
+        code: "B004",
+        title: "Predictably irrational2",
+        author: "Ariely2",
+        year: 2008,
+        copies: 10
+      });
+      db.insert("books", {
         code: "B005",
         title: "Tesla: Man out of time",
         author: "Cheney",
@@ -926,6 +1045,13 @@
         title: "Hubble: Window of the universe",
         author: "Sparrow",
         year: 2010,
+        copies: 10
+      });
+      db.insert("books", {
+        code: "B009",
+        title: "Hubble: Window of the universe",
+        author: "Ramachandran",
+        year: 1999,
         copies: 10
       });
 
@@ -1024,12 +1150,12 @@
     // an ID field with the internal auto-incremented id of the row is also included
     // thus, ID is a reserved field name
 
-    db.queryAll("books", {
+    let d = db.queryAll("books", {
       query: {
         author: "ramachandran"
       }
     });
-
+    let indexD = db._getDataByIndex("books", "author", "ramachandran")
     /* results
     [
      {
@@ -1054,7 +1180,7 @@
     db.update("books", {
       year: 1999
     }, function (row) {
-      row.title = "Unknown";
+      row.author = "Unknown";
 
       // the update callback function returns to the modified record
       return row;
@@ -1119,6 +1245,8 @@
     }).catch(e => {
       console.log(e)
     })
+
+    db.travelIndex("books")
   }
 
   exports.Dber = Dber;

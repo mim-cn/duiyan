@@ -37,9 +37,12 @@
    * tree base operate
    */
   class TreeBase {
-    constructor(name, comparator) {
+    constructor(name, type, comparator) {
+      this.type = type
       this._name = name || 'treebase'
-      this._comparator = comparator;
+      if (comparator) {
+        this._comparator = comparator;
+      }
     }
     // removes all nodes from the tree
     clear() {
@@ -48,6 +51,9 @@
     }
     // returns node data if found, null otherwise
     find(data) {
+      if (!this._comparator) {
+        this._comparator = gen_comparator(data)
+      }
       var res = this._root;
       while (res !== null) {
         var c = this._comparator(data, res.data);
@@ -61,6 +67,9 @@
     }
     // returns iterator to node if found, null otherwise
     findIter(data) {
+      if (!this._comparator) {
+        this._comparator = gen_comparator(data)
+      }
       var res = this._root;
       var iter = this.iterator();
       while (res !== null) {
@@ -77,6 +86,9 @@
     }
     // Returns an iterator to the tree node at or immediately after the item
     lowerBound(item) {
+      if (!this._comparator) {
+        this._comparator = gen_comparator(data)
+      }
       var cur = this._root;
       var iter = this.iterator();
       var cmp = this._comparator;
@@ -105,6 +117,9 @@
     }
     // Returns an iterator to the tree node immediately after the item
     upperBound(item) {
+      if (!this._comparator) {
+        this._comparator = gen_comparator(data)
+      }
       var iter = this.lowerBound(item);
       var cmp = this._comparator;
 
@@ -150,7 +165,7 @@
       var it = this.iterator(),
         data;
       while ((data = it.next()) !== null) {
-        if (cb(data) === false) {
+        if (cb(data, it.other()) === false) {
           return;
         }
       }
@@ -160,7 +175,7 @@
       var it = this.iterator(),
         data;
       while ((data = it.prev()) !== null) {
-        if (cb(data) === false) {
+        if (cb(data, it.other()) === false) {
           return;
         }
       }
@@ -172,36 +187,60 @@
       flag = (flag && "string" === typeof flag) ? flag.toUpperCase() : ''
       try {
         if (!s && !e) {
-          this.each(function (d) {
-            ret.push(d)
+          this.each(function (d, o) {
+            ret.push({
+              data: d,
+              other: o
+            })
           })
         } else if (s && !e) {
           let iter = this.findIter(s)
           if (flag.indexOf('L') != -1) {
-            ret.push(iter.data())
+            ret.push({
+              data: iter.data(),
+              other: iter.other()
+            })
           }
           while (iter.next()) {
-            ret.push(iter.data())
+            ret.push({
+              data: iter.data(),
+              other: iter.other()
+            })
           }
         } else if (!s && e) {
           let itere = this.findIter(e)
           if (flag.indexOf('R') != -1) {
-            ret.unshift(itere.data())
+            ret.unshift({
+              data: iter.data(),
+              other: iter.other()
+            })
           }
           while (itere.prev()) {
-            ret.unshift(itere.data())
+            ret.unshift({
+              data: iter.data(),
+              other: iter.other()
+            })
           }
         } else if (s && e) {
           let iters = this.findIter(s)
           let itere = this.findIter(e)
           if (flag.indexOf('L') != -1) {
-            ret.push(iters.data())
+            ret.push({
+              data: iter.data(),
+              other: iter.other()
+            })
           }
           while (iters.next() != itere) {
-            ret.push(iter.data())
+            ret.push({
+              data: iter.data(),
+              other: iter.other()
+            })
           }
           if (flag.indexOf('R') != -1) {
-            ret.push(itere.data())
+            ret.push({
+              data: iter.data(),
+              other: iter.other()
+            })
           }
         } else {
           ret = []
@@ -217,9 +256,15 @@
     like(data) {
       let ret = [];
       let bound = this.lowerBound(data)
-      ret.push(bound.data())
+      ret.push({
+        data: bound.data(),
+        other: bound.other(),
+      })
       while (bound.next() && 0 === bound.data().indexOf(data)) {
-        ret.push(bound.data())
+        ret.push({
+          data: bound.data(),
+          other: bound.other(),
+        })
       }
       return ret
     }
@@ -235,10 +280,10 @@
       this._cursor = null;
     }
     data() {
-      if (this._cursor && this._cursor.other) {
-        return this._cursor !== null ? [this._cursor.data, this._cursor.other] : null;
-      }
       return this._cursor !== null ? this._cursor.data : null;
+    }
+    other() {
+      return this._cursor !== null ? this._cursor.other : null;
     }
     // if null-iterator, returns first node
     // otherwise, returns next node
@@ -268,7 +313,8 @@
           this._minNode(this._cursor.right);
         }
       }
-      return this._cursor !== null ? this._cursor.data : null;
+      // return this._cursor !== null ? this._cursor.data : null;
+      return this.data()
     }
     // if null-iterator, returns last node
     // otherwise, returns previous node
@@ -295,7 +341,8 @@
           this._maxNode(this._cursor.left);
         }
       }
-      return this._cursor !== null ? this._cursor.data : null;
+      // return this._cursor !== null ? this._cursor.data : null;
+      return this.data()
     }
     _minNode(start) {
       while (start.left !== null) {
@@ -338,8 +385,8 @@
   }
 
   class BinTree extends TreeBase {
-    constructor(name, comparator) {
-      super(name, comparator);
+    constructor(name, type, comparator) {
+      super(name, type, comparator);
       this._root = null;
       // this._comparator = comparator;
       this.size = 0;
@@ -389,7 +436,9 @@
       if (this._root === null) {
         return false;
       }
-
+      if (!this._comparator) {
+        this._comparator = gen_comparator(data)
+      }
       var head = new Node(undefined); // fake tree root
       var node = head;
       node.right = this._root;
@@ -478,8 +527,8 @@
    * red-black tree
    */
   class RBTree extends TreeBase {
-    constructor(name, comparator) {
-      super(name, comparator);
+    constructor(name, type, comparator) {
+      super(name, type, comparator);
       this._root = null;
       // this._comparator = comparator;
       this.size = 0;
@@ -720,6 +769,7 @@
   }
 
   exports.RBTree = RBTree;
+  exports.rbNode = rbNode;
   exports.BinTree = BinTree;
   exports.testRBTree = testRBTree;
   exports.testBinTree = testBinTree;

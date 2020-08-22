@@ -123,6 +123,7 @@
       offset = offset ? offset : 1;
       let arr = number2IntArray(num, offset, flag);
       this.buffer = this.buffer ? mergeArrayBuffer(this.buffer, arr) : arr;
+      return true
     }
 
     /**
@@ -130,10 +131,32 @@
      * @param {String} str 
      */
     writeString(str) {
+      if (typeof str === 'object') {
+        return this.writeObject(str)
+      }
       if (str && 0 != str.length) {
         let arr = str2ab(str);
         this.buffer = this.buffer ? mergeArrayBuffer(this.buffer, arr) : arr;
       }
+      return true
+    }
+
+    /**
+     * 将字符串写入buffer
+     * @param {String} str 
+     */
+    writeObject(obj) {
+      try {
+        let str = JSON.stringify(obj)
+        if (str && 0 != str.length) {
+          let arr = str2ab(str);
+          this.buffer = this.buffer ? mergeArrayBuffer(this.buffer, arr) : arr;
+        }
+      } catch (e) {
+        console.error(e)
+        return false
+      }
+      return true
     }
 
     /**
@@ -161,7 +184,20 @@
         arr = this.buffer.slice(this.offset, offset);
         this.offset += offset;
       }
-      return ab2str(arr);
+      let ostr = ab2str(arr);
+      try {
+        return JSON.parse(ostr)
+      } catch (e) {
+        return ostr
+      }
+    }
+    readObject(offset) {
+      let ostr = this.readString(offset)
+      try {
+        return JSON.parse(ostr)
+      } catch (e) {
+        return {}
+      }
     }
   }
 
