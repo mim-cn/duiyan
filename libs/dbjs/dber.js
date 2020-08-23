@@ -33,8 +33,8 @@
       // this.ctx = JSON.parse(this.db)
       // console.log(JSON.parse(this.db))
       if (!(this.db && (this.db = JSON.parse(this.db, function (key, value) {
-          self.__dataReviver(this, value)
-        })) && this.db.tables && this.db.data)) {
+        self.__dataReviver(this, value)
+      })) && this.db.tables && this.db.data)) {
         if (!this._validateName(db_name)) {
           this._error("The name '" + db_name + "' contains invalid characters");
         } else {
@@ -379,7 +379,7 @@
             }
 
             if (results[i].hasOwnProperty(d) && seen.hasOwnProperty(results[i][d])) {
-              delete(results[i]);
+              delete (results[i]);
             } else {
               seen[results[i][d]] = 1;
             }
@@ -432,7 +432,7 @@
       var result_ids = [],
         exists = false,
         row = null;
-    
+
       // loop through all the records in the table, looking for matches
       for (var ID in this.db.data[table_name]) {
         if (!this.db.data[table_name].hasOwnProperty(ID)) {

@@ -15,8 +15,8 @@ Page({
   },
   //事件处理函数  
   bindViewTap: function () {
-    wx.navigateTo({
-      url: '../logs/logs'
+    wx.previewImage({
+      urls: [this.data.userInfo.avatarUrl],
     })
   },
   onLoad: function () {
@@ -108,7 +108,7 @@ Page({
           break;
         case 1:
           this.setData({
-            motto: res.id + "@" + res.LocalInfo.address
+            motto: res.id + "@" + res.IPinfo.address
           })
           this.data.info = {
             [res.id + '']: app.globalData.userInfo
@@ -141,20 +141,22 @@ Page({
     })
   },
   onRefresh(e) {
+    let self = this
     wx.showToast({
       title: '加载中....',
       icon: 'loading'
     });
-    let res = app.udper.getLocalip(true)
-    if (res) {
-      this.setData({
-        motto: res.id + "@" + res.address
-      })
-    }
+    app.udper.getLocalip(true).then(res => {
+      if (res) {
+        self.setData({
+          motto: res.id + "@" + res.address
+        })
+      }
+    })
     setTimeout(function () {
       wx.stopPullDownRefresh();
       wx.hideToast({
-        complete: (res) => {},
+        complete: (res) => { },
       })
     }, 1000)
   },
