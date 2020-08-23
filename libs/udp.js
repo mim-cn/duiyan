@@ -2,11 +2,15 @@
  * header：
  * 
  *   1 byte 0:
- *     0[0000 0000b]: "SYNCS"  同步局域网内状态   128[1000 0000b]: "A_SYNCS"  确认同步
- *     1[0000 0001b]: "LOCAL"  定位本设备ip信息   129[0000 0001b]: "A_LOCAL"  确认定位
- *     2[0000 0010b]: "BEGIN"  首次开始数据传输   130[1000 0010b]: "A_BEGIN"  确认开始
- *     3[0000 0011b]: "DOING"  中间数据传输过程   131[1000 0011b]: "A_DOING"  确认数据
- *     4[0000 0100b]: "DONED"  结束数据传输过程   132[1000 0100b]: "A_DONED"  确认结束
+ *     0[0000 0000b]: "SYNCS"  同步局域网内状态  <=>  128[1000 0000b]: "A_SYNCS"  确认同步
+ *     1[0000 0001b]: "LOCAL"  定位本设备的信息  <=>  129[1000 0001b]: "A_LOCAL"  确认定位
+ *     2[0000 0010b]: "BEGIN"  首次开始数据传输  <=>  130[1000 0010b]: "A_BEGIN"  确认开始
+ *     4[0000 0100b]: "DOING"  中间数据传输过程  <=>  132[1000 0100b]: "A_DOING"  确认数据
+ *     8[0000 1000b]: "DONED"  结束数据传输过程  <=>  136[1000 1000b]: "A_DONED"  确认结束
+ *     NOTE:
+ *         1. 业务层需要按照数据的发送状态设置合理的数据包标志，但是如果没有按照合法的设置，存在一定风险，导致数据控制紊乱。
+ *         2. 首个数据包、中间数据包、结束数据包允许同时存在（允许也建议 FBDD），可以拆分成 FB00 + F0DD 或 FB00 + F0D0 + F00D
+ *         3. 首个数据包不能与中间数据包单独同时存在（禁止 FBD0）
  *   4 byte 1 ~ 4:
  *     sequence
  *   2 byte 5 ~ 6:
@@ -31,7 +35,7 @@
   }
 })(this, function (exports) {
   const utils = require('./utils')
-  const event = require('./event.js')
+  const _event = require('./event.js')
   const {
     Messge
   } = require("./message");
@@ -67,16 +71,102 @@
     return Object.prototype.toString.call(obj).slice(8, -1)
   }
 
+  const IsLanIP = (ip) => {
+    return (ip.substr(0, 3) == "10." ||
+      ip.substr(0, 4) == "192." ||
+      ip.substr(0, 4) == "172."
+    ) ? true : false;
+  }
+
+  // 局域网最大数据包大小
+  const LAN_PACK_SIZE = 1444
+  // 广域网最大数据包大小
+  const WAN_PACK_SIZE = 520
+  // 数据包反消息类型
+  const rMsgType = {
+    "SYNCS": 0,
+    "LOCAL": 1,
+    "BEGIN": 2,
+    "DOING": 4,
+    "DONED": 8,
+    "DOING|DONED": 12, // 4 | 8,
+    "BEGIN|DOING|DONED": 14, // 2 | 4 | 8,
+    "A_SYNCS": 128,
+    "A_LOCAL": 129,
+    "A_BEGIN": 130,
+    "A_DOING": 132,
+    "A_DONED": 136,
+    "A_DOING|A_DONED": 140, // 132 | 136,
+    "A_BEGIN|A_DOING|A_DONED": 142, // 130 | 132 | 136,
+  }
+
+  // 标志位
+  // 同步数据包
+  const FSYNC = rMsgType['SYNCS']
+  // 定位数据包
+  const FLOCAL = rMsgType['LOCAL']
+  // 首个数据包
+  const FB00 = rMsgType['BEGIN']
+  // 大型数据包中间数据包
+  const F0D0 = rMsgType['DOING']
+  // 结束数据包
+  const F00D = rMsgType['DONED']
+  // 既是中间数据包又是结束数据包， 即rMsgType['DOING'] | rMsgType['DONED']
+  const F0DD = rMsgType['DOING|DONED']
+  // 对于小型数据, 首个数据包既是中间数据包又是最后一个数据包，即rMsgType['BEGIN'] | rMsgType['DOING'] | rMsgType['DONED']
+  const FBDD = rMsgType['BEGIN|DOING|DONED']
+
+  // 确认标志位
+  // 确认同步数据包
+  const A_SYNC = rMsgType['A_SYNCS']
+  // 确认定位数据包
+  const A_LOCAL = rMsgType['A_LOCAL']
+  // 确认首个数据包
+  const A_B00 = rMsgType['A_BEGIN']
+  // 确认大型数据包中间数据包
+  const A_0D0 = rMsgType['A_DOING']
+  // 确认结束数据包
+  const A_00D = rMsgType['A_DONED']
+  // 确认既是中间数据包又是结束数据包，即 rMsgType['A_DOING'] | rMsgType['A_DONED']
+  const A_0DD = rMsgType['A_DOING|A_DONED']
+  // 确认对于小型数据, 首个数据包既是中间数据包又是最后一个数据包，即rMsgType['A_BEGIN'] | rMsgType['A_DOING'] | rMsgType['A_DONED']
+  const A_BDD = rMsgType['A_BEGIN|A_DOING|A_DONED']
+
+  // 数据包消息类型
+  const MsgType = {
+    // 发送数据包类型
+    [FSYNC]: "SYNCS",
+    [FLOCAL]: "LOCAL",
+    [FB00]: "BEGIN",
+    [F0D0]: "DOING",
+    [F00D]: "DONED",
+    [F0DD]: "DOING|DONED",
+    [FBDD]: "BEGIN|DOING|DONED",
+    // 确认数据包类型
+    [A_SYNC]: "A_SYNCS",
+    [A_LOCAL]: "A_LOCAL",
+    [A_B00]: "A_BEGIN",
+    [A_0D0]: "A_DOING",
+    [A_00D]: "A_DONED",
+    [A_0DD]: "A_DOING|A_DONED",
+    [A_BDD]: "A_BEGIN|A_DOING|A_DONED"
+  }
+
+
   // 基于wx.UDPSocket的基础类
   class BaseUdper {
     constructor(port) {
       // 用于udp通信时的事件通知
-      this.$e = event
+      this.$e = _event
       // udp通信绑定的port，默认5328
       this.bport = port;
       // 获取随机分配的设备id，用于唯一标识
       this.id = this.getId();
       this.create(port);
+    }
+    // 私有方法
+    _send(ip, port, msg) {
+      return this.udper.send({ address: ip, port: port, message: msg });
     }
     // 错误处理
     error(msg) {
@@ -84,12 +174,14 @@
     }
     // 初始化udp相关回调
     init() {
-      this.onListening();
-      this.offListening();
-      this.onMessage();
-      this.offMessage();
-      this.onClose();
-      this.offClose();
+      if (this.udper) {
+        this.onListening();
+        this.offListening();
+        this.onMessage();
+        this.offMessage();
+        this.onClose();
+        this.offClose();
+      }
     }
     create(port) {
       try {
@@ -222,6 +314,14 @@
     unserialize(data) {
       return JSON.parse(data)
     }
+    // 设置mtype的每一个bit
+    set_mtype(mtype, flag) {
+      return mtype |= rMsgType[flag]
+    }
+    // 设置mtype的每一个bit
+    get_mtype(mtype, flag) {
+      return mtype & rMsgType[flag]
+    }
     // 设置特殊类型消息的header
     set_header(mtype) {
       let msg = new Messge();
@@ -239,6 +339,22 @@
         seq: msg.readNumber(4),
         peerId: utils.pad(msg.readNumber(2), IDLEN),
       };
+    }
+    // 生成发送的数据包
+    set_data(mtype, data, max_size) {
+      data = this.serialize(data)
+      // 数据包大小处理, 截取前 max_size, PACK_SIZE
+      if (data && (data.length > max_size)) {
+        data = data.slice(0, max_size);
+      }
+      let msg = this.set_header(mtype);
+      // 消息内容
+      msg.writeString(data);
+      return { msg: msg.buffer, size: data.length };
+    }
+    // 检测有效的类型
+    invalidMtype(mtype) {
+      return MsgType[mtype]
     }
     // 接受数据时的回调
     onMessage() {
@@ -258,37 +374,16 @@
     // 向某个ip:port发送类型mtype的消息data
     send(ip, port, mtype, data) {
       let self = this;
+      let PACK_SIZE = IsLanIP(ip) ? WAN_PACK_SIZE : LAN_PACK_SIZE;
       return new Promise((resolver, reject) => {
-        if (!this.MsgType[mtype]) {
-          reject({
-            peerIp: ip,
-            peerPort: port,
-            err: 'INVALID MESSAGE TYPE: ' + mtype
-          });
+        if (!self.invalidMtype(mtype)) {
+          reject({ peerIp: ip, peerPort: port, err: 'INVALID MESSAGE TYPE: ' + mtype });
         }
-        data = this.serialize(data)
-        // 数据包大小处理
-        if (data && (data.length > self.WAN_PACK_SIZE || data.length > self.LAN_PACK_SIZE)) {
-          reject({
-            peerIp: ip,
-            peerPort: port,
-            err: 'Request Entity Too Large!'
-          });
-        } else {
-          let msg = self.set_header(mtype);
-          msg.writeString(data); // 消息内容
-          console.log(msg);
-          this.udper.send({
-            address: ip,
-            port: port,
-            message: msg.buffer
-          });
-          resolver({
-            peerIp: ip,
-            peerPort: port,
-            err: 'ok'
-          });
-        }
+        // 生成代发送的数据包
+        let { msg, size } = self.set_data(mtype, data, PACK_SIZE);
+        // 调用发送
+        self._send(ip, port, msg)
+        resolver({ err: 'ok', size: size, peerIp: ip, peerPort: port });
       });
     }
     // 通过id发送mtype消息的数据data
@@ -400,23 +495,23 @@
         iPint: utils.ip2Int(peerInfo.address),
       };
       switch (mtype) {
-        case 128:
+        case rMsgType['A_SYNCS']:
           data.type = mtype;
           this._handleSync(data);
           break;
-        case 129:
+        case rMsgType['A_LOCAL']:
           data.type = mtype;
           this._handleLocal(data);
           break;
-        case 130:
+        case rMsgType['A_BEGIN']:
           data.type = mtype;
           this.event.emit("onMessage", data);
           break;
-        case 131:
+        case rMsgType['A_DOING']:
           data.type = mtype;
           this.event.emit("onMessage", data);
           break;
-        case 132:
+        case rMsgType['A_DONED']:
           data.type = mtype;
           this.event.emit("onMessage", data);
           break;
@@ -439,24 +534,24 @@
         iPint: utils.ip2Int(peerInfo.address),
       };
       switch (mtype) {
-        case 0:
-          data.type = mtype;
+        case rMsgType['SYNCS']:
+          data.type = 'SYNCS';
           this._handleSync(data);
           break;
-        case 1:
-          data.type = mtype;
+        case rMsgType['LOCAL']:
+          data.type = 'LOCAL';
           this._handleLocal(data);
           break;
-        case 2:
-          data.type = mtype;
+        case rMsgType['BEGIN']:
+          data.type = 'BEGIN';
           this.event.emit("onMessage", data);
           break;
-        case 3:
-          data.type = mtype;
+        case rMsgType['DOING']:
+          data.type = 'DOING';
           this.event.emit("onMessage", data);
           break;
-        case 4:
-          data.type = mtype;
+        case rMsgType['DONED']:
+          data.type = 'DONED';
           this.event.emit("onMessage", data);
           break;
         default:
@@ -536,35 +631,42 @@
 
 
   exports.Udper = Udper;
-
   // 局域网最大数据包大小
-  BaseUdper.prototype.LAN_PACK_SIZE = 1444
+  BaseUdper.prototype.LAN_PACK_SIZE = LAN_PACK_SIZE
   // 广域网最大数据包大小
-  BaseUdper.prototype.WAN_PACK_SIZE = 520
+  BaseUdper.prototype.WAN_PACK_SIZE = WAN_PACK_SIZE
   // 数据包消息类型
-  BaseUdper.prototype.MsgType = {
-    "0": "SYNCS",
-    "1": "LOCAL",
-    "2": "BEGIN",
-    "3": "DOING",
-    "4": "DONED",
-    "128": "A_SYNCS",
-    "129": "A_LOCAL",
-    "130": "A_BEGIN",
-    "131": "A_DOING",
-    "132": "A_DONED",
-  }
+  BaseUdper.prototype.MsgType = MsgType
   // 数据包反消息类型
-  BaseUdper.prototype.rMsgType = {
-    "SYNCS": 0,
-    "LOCAL": 1,
-    "BEGIN": 2,
-    "DOING": 3,
-    "DONED": 4,
-    "A_SYNCS": 128,
-    "A_LOCAL": 129,
-    "A_BEGIN": 130,
-    "A_DOING": 131,
-    "A_DONED": 132,
-  }
+  BaseUdper.prototype.rMsgType = rMsgType
+  // 标志位
+  // 同步数据包
+  BaseUdper.prototype.FSYNC = FSYNC
+  // 定位数据包
+  BaseUdper.prototype.FLOCAL = FLOCAL
+  // 首个数据包
+  BaseUdper.prototype.FB00 = FB00
+  // 大型数据包中间数据包
+  BaseUdper.prototype.F0D0 = F0D0
+  // 结束数据包
+  BaseUdper.prototype.F00D = F00D
+  // 既是中间数据包又是结束数据包
+  BaseUdper.prototype.F0DD = F0DD
+  // 对于小型数据, 首个数据包既是中间数据包又是最后一个数据包
+  BaseUdper.prototype.FBDD = FBDD
+  // 确认标志位
+  // 确认同步数据包
+  BaseUdper.prototype.A_SYNC = A_SYNC
+  // 确认定位数据包
+  BaseUdper.prototype.A_LOCAL = A_LOCAL
+  // 确认首个数据包
+  BaseUdper.prototype.A_B00 = A_B00
+  // 确认大型数据包中间数据包
+  BaseUdper.prototype.A_0D0 = A_0D0
+  // 确认结束数据包
+  BaseUdper.prototype.A_00D = A_00D
+  // 确认既是中间数据包又是结束数据包
+  BaseUdper.prototype.A_0DD = A_0DD
+  // 确认对于小型数据, 首个数据包既是中间数据包又是最后一个数据包
+  BaseUdper.prototype.A_BDD = A_BDD
 });

@@ -3,6 +3,7 @@
 import Page from '../../components/page/page';
 //获取应用实例
 const app = getApp()
+const udper = app.udper
 const dber = require('../../libs/dbjs/dber')
 
 Page({
@@ -26,8 +27,8 @@ Page({
     this.onMessage("onMessage");
     this.getUserInfo2().then(res => {
       this.setData(res);
-      app.udper.connect()
     })
+    udper.connect();
   },
   getUserInfo2: function (e) {
     return new Promise((resolver, reject) => {
@@ -70,15 +71,15 @@ Page({
     this.onRefresh(e);
   },
   onSaveExitState() {
-    if (app.udper) {
-      app.udper.close()
+    if (udper) {
+      udper.close()
     }
   },
   bindSend: function (e) {
     let id = this.data.peerId
     let ip = this.data.peerIp
     let msg = this.data.msg
-    app.udper.sendById(id, '2', msg).then(res => {
+    udper.sendById(id, '2', msg).then(res => {
       console.log(res)
     }).catch(e => {
       wx.showToast({
@@ -101,12 +102,12 @@ Page({
       console.log("event onMessage:", res)
       let msg_type = res.type
       switch (msg_type) {
-        case 0:
+        case 'SYNCS':
           wx.showToast({
             title: 'online: ' + res.online,
           })
           break;
-        case 1:
+        case 'LOCAL':
           this.setData({
             motto: res.id + "@" + res.IPinfo.address
           })
@@ -114,18 +115,10 @@ Page({
             [res.id + '']: app.globalData.userInfo
           }
           break;
-        case 2:
+        default:
           wx.showToast({
             title: res.message,
           })
-          break;
-        case 3:
-          break;
-        case 4:
-          break;
-        case 5:
-          break;
-        default:
           break;
       }
     })
@@ -146,7 +139,7 @@ Page({
       title: '加载中....',
       icon: 'loading'
     });
-    app.udper.getLocalip(true).then(res => {
+    udper.getLocalip(true).then(res => {
       if (res) {
         self.setData({
           motto: res.id + "@" + res.address
