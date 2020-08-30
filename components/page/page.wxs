@@ -1,0 +1,258 @@
+var newmarkY = startmarkY = 0
+var newmarkX = startmarkX = 0
+/** 页面统计信息
+ * 
+ * scrollTop  页面滚动位置
+ * reachBottom 页面是否触底
+ * Custom 页面自定义状态栏 信息
+ * CustomBar 页面自定义状态栏高度
+ * StatusBar 状态栏高度
+ * ScreenWidth 屏幕宽度
+ * ScreenHeight 屏幕高度
+ * 
+ */
+var pageStats = {
+  scrollTop: 0, // 页面滚动位置
+  reachBottom: false, // 页面是否触底
+  Custom: 0, // 页面自定义状态栏 信息
+  CustomBar: 0, // 页面自定义状态栏高度
+  StatusBar: 0, // 状态栏高度
+  ScreenWidth: 0, // 屏幕宽度
+  ScreenHeight: 0 // 屏幕高度
+}
+
+/**
+ * 处理fixed 样式的view
+ */
+function _handleFixedView(e, ins, type) {
+  var all = ins.selectAllComponents('.fixed')
+  switch (type) {
+    case 'remove': // 清除fixed的top属性
+      for (var i = 0; i < all.length; ++i) {
+        all[i].setStyle({
+          top: '0px'
+        })
+      }
+      break
+    case 'add': // 回复fixed的top属性
+      for (var i = 0; i < all.length; ++i) {
+        all[i].setStyle({
+          top: pageStats.CustomBar + 'px'
+        })
+      }
+      break
+    default:
+      break
+  }
+}
+
+/**
+ * 处理 sticky 效果
+ */
+function _handleStickyView(e, ins, type) {
+  // console.log("_handleStickyView", JSON.stringify(e))
+  var all = ins.selectAllComponents('.sticky-view')
+  switch (type) {
+    case 'remove': // 清除sticky属性
+      for (var i = 0; i < all.length; ++i) {
+        all[i].setStyle({
+          'top': 'auto',
+          'position': '',
+          'z-index': 0
+        })
+      }
+      break
+    case 'add': // 添加sticky属性
+      for (var i = 0; i < all.length; ++i) {
+        all[i].setStyle({
+          'top': pageStats.CustomBar + 'px',
+          'position': 'fixed',
+          'z-index': '99999'
+        })
+      }
+      break
+    default:
+      break
+  }
+}
+
+/**
+ * 处理上/下拉事件
+ */
+function _handlePullView(e, ins, type) {
+  var ret = {}
+  switch (type) {
+    case 'remove': // 清除属性
+      // ins.selectComponent('.pull-up').removeClass("loading")
+      ins.selectComponent('.pull-down').removeClass("loading")
+      ins.selectComponent('.page-top').setStyle({
+        transform: ''
+      })
+      break
+    case 'add': // 添加属性
+      break
+    case 'check':
+      ret.enablePullDownRefresh = ins.selectComponent('.pull-down').hasClass('enablePullDownRefresh') || false
+      ret.enablePullUpRefresh = ins.selectComponent('.pull-up').hasClass('enablePullUpRefresh') || false
+      break
+    default:
+      break
+  }
+  return ret
+}
+
+/**
+ * 触摸事件开始，初始化触点
+ */
+function touchstart(e, ins) {
+  startmarkX = newmarkX = (e.touches[0] || e.changedTouches[0]).pageX
+  startmarkY = newmarkY = (e.touches[0] || e.changedTouches[0]).pageY
+}
+
+/**
+ * 触摸事件结束，处理视图层变化，并回调事件处理函数
+ */
+function touchmove(e, ins) {
+  var pullRet = _handlePullView(e, ins, 'check')
+  var enablePullUpRefresh = pullRet.enablePullUpRefresh
+  var enablePullDownRefresh = pullRet.enablePullDownRefresh
+  // 处理 Sticky
+  // console.log(JSON.stringify(pullRet))
+  if ((pageStats.scrollTop || 0) > 45) {
+    _handleStickyView(e, ins, 'add')
+  } else {
+    _handleStickyView(e, ins, 'remove')
+  }
+  // 页面没有到达顶部(<5) 或 底部，不做下拉和上拉事件通知
+  if ((pageStats.scrollTop || 0) > 5) {
+    return
+  }
+  var pageX = (e.touches[0] || e.changedTouches[0]).pageX
+  var pageY = (e.touches[0] || e.changedTouches[0]).pageY
+  newmarkX = pageX
+  newmarkY = pageY
+  var width = e.target.dataset.width || e.currentTarget.dataset.width
+  var pullDownWidth = pageStats.ScreenHeight * 0.05
+  var moveX = Math.abs(pageX - startmarkX)
+  var moveY = Math.abs(pageY - startmarkY)
+  if (moveX <= moveY) { // 上下
+    if (startmarkY < pageY) {
+      e.direction = "down"
+      // console.log("touchmove 下:" + startmarkY + " " + pageY + JSON.stringify(pageStats))
+      // 满足下拉条件，且开启了下拉刷新的使用才触发动画
+      if (pullDownWidth > Math.abs(newmarkY - startmarkY) && enablePullDownRefresh) {
+        // 下拉清除fixed
+        _handleFixedView(e, ins, 'remove')
+        ins.selectComponent('.page-top').setStyle({
+          transform: 'translateY(' + Math.min(pullDownWidth, newmarkY - startmarkY) + 'px)'
+        })
+        ins.selectComponent('.pull-down').addClass("loading")
+      }
+    }
+    // 满足上拉条件，且开启了上拉刷新的使用才触发动画
+    if (startmarkY > pageY && enablePullUpRefresh) {
+      e.direction = "up"
+      // 考虑到布局问题，和下拉清除fixed相关属性有些条件区别，这个是调试后的结果
+      _handleFixedView(e, ins, 'remove')
+      // console.log("上:" + newmarkY + " " + startmarkY)
+      // ins.selectComponent('.page-top').setStyle({
+      //   transform: 'translateY(-' + Math.min(pullDownWidth, (startmarkY - newmarkY)) + 'px)'
+      // })
+      // ins.selectComponent('.pull-up').addClass("loading")
+    }
+  } else {
+    if (startmarkX < pageX) {
+      e.direction = "right"
+      // console.log("右:" + startmarkX + " " + pageX)
+    }
+    if (startmarkX > pageX) {
+      e.direction = "left"
+      // console.log("左:" + startmarkX + " " + pageX)
+    }
+  }
+  // 是否需要触发触摸过程中的事件
+  ins.callMethod('pageEventObserver', e)
+}
+
+/**
+ * 触摸事件结束，处理视图层，并回调事件处理函数
+ */
+function touchend(e, ins) {
+  var pullRet = _handlePullView(e, ins, 'check')
+  var enablePullUpRefresh = pullRet.enablePullUpRefresh
+  var enablePullDownRefresh = pullRet.enablePullDownRefresh
+  // console.log("touchend:", JSON.stringify(pageStats))
+  // console.log(enablePullUpRefresh, enablePullDownRefresh)
+  // 处理 添加 fix
+  _handleFixedView(e, ins, 'add')
+  // 删除可能存在的动画
+  _handlePullView(e, ins, 'remove')
+  // 页面没有到达顶部(<5) 或 底部，不做下拉和上拉事件通知    
+  if ((pageStats.scrollTop || 0) > 5) {
+    return
+  }
+  var pageX = (e.touches[0] || e.changedTouches[0]).pageX
+  var pageY = (e.touches[0] || e.changedTouches[0]).pageY
+  newmarkX = pageX
+  newmarkY = pageY
+  var width = e.target.dataset.width || e.currentTarget.dataset.width
+  var pullDownWidth = pageStats.ScreenHeight * 0.05
+  var moveX = Math.abs(pageX - startmarkX)
+  var moveY = Math.abs(pageY - startmarkY)
+  if (moveX <= moveY) { // 上下
+    if (startmarkY < pageY && (pageStats.scrollTop || 0) < 5) {
+      e.direction = "down"
+      // console.log("touchend 下:" + startmarkY + " " + pageY)
+      if (enablePullDownRefresh) {
+        ins.callMethod('onPageEvent', e)
+      }
+    }
+    if (startmarkY > newmarkY) {
+      e.direction = "up"
+      // console.log("上:" + startmarkY + " " + pageY)
+      if (enablePullUpRefresh && pageStats.reachBottom) {
+        ins.callMethod('onPageEvent', e)
+      }
+    }
+  } else {
+    if (startmarkX < pageX) {
+      e.direction = "right"
+      // console.log("右:" + startmarkX + " " + pageX)
+      ins.callMethod('onPageEvent', e)
+    }
+    if (startmarkX > pageX) {
+      e.direction = "left"
+      // console.log("左:" + startmarkX + " " + pageX)
+      ins.callMethod('onPageEvent', e)
+    }
+  }
+}
+
+function touchcancel(e, ins) {
+  console.log(JSON.stringify(e), JSON.stringify(ins))
+}
+
+/**
+ * 监控数据js层变化
+ */
+function propObserver(newValue, oldValue, ownerInstance, instance) {
+  pageStats = newValue || {}
+  // console.log(JSON.stringify(pageStats))
+}
+
+/**
+ * 获取pagestatas 中的数据
+ */
+function getPageStats(key) {
+  // console.log(JSON.stringify(pageStats) + " " + key)
+  return pageStats[key] || pageStats
+}
+
+module.exports = {
+  touchStart: touchstart,
+  touchMove: touchmove,
+  touchEnd: touchend,
+  touchCancel: touchcancel,
+  propObserver: propObserver,
+  getPageStats: getPageStats
+}

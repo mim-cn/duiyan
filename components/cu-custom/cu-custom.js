@@ -14,7 +14,7 @@ Component({
     bgColor: {
       type: String,
       default: ''
-    }, 
+    },
     Left: {
       type: [Boolean, String],
       default: false
@@ -48,15 +48,13 @@ Component({
    * 组件的方法列表
    */
   methods: {
-    BackPage() {
-      wx.navigateBack({
-        delta: 1
-      });
+    onLeft(e) {
+      var myEventOption = {} // 触发事件的选项
+      this.triggerEvent('left', e, myEventOption)
     },
-    toHome(){
-      wx.reLaunch({
-        url: '/pages/index/index',
-      })
+    onRight(e) {
+      var myEventOption = {} // 触发事件的选项
+      this.triggerEvent('right', e, myEventOption)
     }
   }
 })
