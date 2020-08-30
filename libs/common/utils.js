@@ -112,7 +112,6 @@ const newAb2Str = arrayBuffer => {
   return decodedString;
 }
 
-
 /**
  *
  * 16位整数转16进制字节码
@@ -195,13 +194,50 @@ const crc16 = (decimalBytes) => {
   return crc;
 }
 
+/**
+ * let bool = true;
+ * let num = 1;
+ * let str = 'abc';
+ * let und = undefined;
+ * let nul = null;
+ * let arr = [1,2,3,4];
+ * let obj = {name:'xiaoming',age:22};
+ * let fun = function(){console.log('hello')};
+ * let s1 = Symbol();
+ * Object.prototype.toString.call(bool);//[object Boolean]
+ * Object.prototype.toString.call(num); //[object Number]
+ * Object.prototype.toString.call(str); //[object String]
+ * Object.prototype.toString.call(und); //[object Undefined]
+ * Object.prototype.toString.call(nul); //[object Null]
+ * Object.prototype.toString.call(arr); //[object Array]
+ * Object.prototype.toString.call(obj); //[object Object]
+ * Object.prototype.toString.call(fun); //[object Function]
+ * Object.prototype.toString.call(s1);  //[object Symbol]
+ */
+const Type = (obj) => {
+  return Object.prototype.toString.call(obj).slice(8, -1)
+}
+
+/**
+ * 是否是局域网IP
+ */
+const IsLanIP = (ip) => {
+  return (ip.substr(0, 3) == "10." ||
+    ip.substr(0, 4) == "192." ||
+    ip.substr(0, 4) == "172."
+  ) ? true : false;
+}
+
+
 module.exports = {
-  pad: pad,
-  crc16: crc16,
-  int2Ip: int2Ip,
-  ip2Int: ip2Int,
-  newAb2Str: newAb2Str,
-  randomNum: randomNum,
-  formatTime: formatTime,
-  getTimestamp: getTimestamp,
+  Pad: pad,
+  Type: Type,
+  Crc16: crc16,
+  Int2Ip: int2Ip,
+  Ip2Int: ip2Int,
+  IsLanIP: IsLanIP,
+  NewAb2Str: newAb2Str,
+  RandomNum: randomNum,
+  FormatTime: formatTime,
+  GetTimestamp: getTimestamp,
 }

@@ -72,15 +72,17 @@ Page({
   },
   onSaveExitState() {
     if (udper) {
-      udper.close()
+      udper.offline()
     }
   },
   bindSend: function (e) {
     let id = this.data.peerId
     let ip = this.data.peerIp
     let msg = this.data.msg
-    udper.sendById(id, '2', msg).then(res => {
+    let fd = udper.open()
+    udper.sendById(fd, id, msg).then(res => {
       console.log(res)
+      udper.close(fd)
     }).catch(e => {
       wx.showToast({
         title: e.err,

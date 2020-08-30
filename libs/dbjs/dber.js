@@ -13,7 +13,7 @@
   }
 })(this, function (exports) {
 
-  const lzw = require('../lzw')
+  const lzw = require('../common/lzw')
   const indexTree = require('./tree').RBTree
   const indexNode = require('./tree').rbNode
 
