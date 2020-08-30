@@ -81,7 +81,7 @@
    * @param {ArrayBuffer} buf 
    */
   const ab2str = (buf) => {
-    let encodedString = buf && (buf.byteLength > 0) ? String.fromCharCode.apply(null, new Uint8Array(buf)) : '';
+    let encodedString = buf && (buf.byteLength > 0) ? String.fromCharCode.apply(null, new Uint16Array(buf)) : '';
     return encodedString
   }
 
@@ -104,15 +104,13 @@
 
 
   class Messge {
-    constructor(any) {
-      if (typeof any === "number") {
-        this.buffer = new ArrayBuffer(any || 0);
-      } else if (any instanceof ArrayBuffer) {
-        this.buffer = any;
+    constructor(buffer) {
+      if (!buffer) {
+        this.buffer = new ArrayBuffer(0);
+      } else {
+        this.buffer = buffer;
       }
-      this.dataView = new DataView(this.buffer)
-      this.woffset = 0;
-      this.roffset = 0;
+      this.offset = 0;
     }
 
     /**
@@ -123,21 +121,9 @@
      */
     writeNumber(num, offset, flag) {
       offset = offset ? offset : 1;
-      switch (offset) {
-        case 1:
-          (flag == true) ? this.dataView.setInt8(this.woffset, num): this.dataView.setUint8(this.woffset, num)
-          break;
-        case 2:
-          (flag == true) ? this.dataView.setInt16(this.woffset, num): this.dataView.setUint16(this.woffset, num)
-          break;
-        case 4:
-          (flag == true) ? this.dataView.setInt32(this.woffset, num): this.dataView.setUint32(this.woffset, num)
-          break;
-        default:
-          (flag == true) ? this.dataView.setInt8(this.woffset, num): this.dataView.setUint8(this.woffset, num)
-          break
-      }
-      this.woffset += offset
+      let arr = number2IntArray(num, offset, flag);
+      this.buffer = this.buffer ? mergeArrayBuffer(this.buffer, arr) : arr;
+      return true
     }
 
     /**
@@ -145,12 +131,12 @@
      * @param {String} str 
      */
     writeString(str) {
-      let strLen = str.length
-      if (str && 0 != strLen) {
-        for (let i = 0; i < strLen; i++) {
-          this.dataView.setUint8(this.woffset, str.charCodeAt(i))
-          this.woffset++
-        }
+      if (typeof str === 'object') {
+        return this.writeObject(str)
+      }
+      if (str && 0 != str.length) {
+        let arr = str2ab(str);
+        this.buffer = this.buffer ? mergeArrayBuffer(this.buffer, arr) : arr;
       }
       return true
     }
@@ -179,24 +165,10 @@
      * @param {Boolean} flag 
      */
     readNumber(offset, flag) {
-      let num = 0;
       offset = offset ? offset : 1;
-      switch (offset) {
-        case 1:
-          num = (flag == true) ? this.dataView.getInt8(this.roffset) : this.dataView.getUint8(this.roffset)
-          break;
-        case 2:
-          num = (flag == true) ? this.dataView.getInt16(this.roffset) : this.dataView.getUint16(this.roffset)
-          break;
-        case 4:
-          num = (flag == true) ? this.dataView.getInt32(this.roffset) : this.dataView.getUint32(this.roffset)
-          break;
-        default:
-          num = (flag == true) ? this.dataView.getInt8(this.roffset) : this.dataView.getUint8(this.roffset)
-          break
-      }
-      this.roffset += offset
-      return num
+      let arr = this.buffer.slice(this.offset, this.offset + offset);
+      this.offset += offset;
+      return intArray2Number(arr, offset, flag);
     }
 
     /**
@@ -206,11 +178,11 @@
     readString(offset) {
       let arr = null;
       if (!offset) {
-        arr = this.buffer.slice(this.roffset);
-        this.roffset = this.buffer.bytelength;
+        arr = this.buffer.slice(this.offset);
+        this.offset = this.buffer.bytelength;
       } else {
-        arr = this.buffer.slice(this.roffset, offset);
-        this.roffset += offset;
+        arr = this.buffer.slice(this.offset, offset);
+        this.offset += offset;
       }
       let ostr = ab2str(arr);
       try {
@@ -226,15 +198,6 @@
       } catch (e) {
         return {}
       }
-    }
-
-    /**
-     * 
-     * @param {Number} start 
-     * @param {Number} end 
-     */
-    slice(start, end) {
-      return this.buffer.slice(start, end).buffer
     }
   }
 
