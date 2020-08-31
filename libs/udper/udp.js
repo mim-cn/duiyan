@@ -15,7 +15,9 @@
  *     sequence
  *   2 byte 5 ~ 6:
  *     send peer id
- *   n byte 7 ~  wan MAX: 548-7 = 541 ~= 512 ; lan MAX: 1472-7 = 1465 ~= 1024
+ *   2 byte 7 ~ 8:
+ *     crc16 checksum
+ *   n byte 9 ~  wan MAX: 548-7 = 541 ~= 512 ; lan MAX: 1472-7 = 1465 ~= 1024
  *     
  * 
  * version 1.0:
@@ -542,7 +544,7 @@
     }
 
     // 向某个ip:port发送类型mtype的消息data
-    send(fd, ip, port, mtype, data) {
+    send(fd, ip, port, mtype, payload) {
       let self = this;
       console.log(fd, self.fdinfo(fd))
       let PACK_SIZE = utils.IsLanIP(ip) ? WAN_PACK_SIZE : LAN_PACK_SIZE;
@@ -551,7 +553,7 @@
           reject({ err: 'INVALID MESSAGE TYPE: ' + mtype, peerIp: ip, peerPort: port });
         }
         // 生成代发送的数据包 seq 只有再Ack包是传入
-        let { msg, seq, size } = self.setData(fd, mtype, data, PACK_SIZE);
+        let { msg, seq, size } = self.setData(fd, mtype, payload, PACK_SIZE);
         // 设置超时定时器                
         let intervalID = setInterval(function () {
           console.log('retry send', mtype, ip, port)
@@ -577,11 +579,11 @@
       });
     }
     // 通过id发送mtype消息的数据data
-    sendById(fd, id, data) {
+    sendById(fd, id, payload) {
       let self = this;
       let info = self.getOthers(id) || [];
       return Promise.all(info.map((item) => {
-        return self.send(fd, item.address, item.port, 2, data);
+        return self.send(fd, item.address, item.port, 2, payload);
       }));
     }
 
@@ -705,7 +707,6 @@
     }
     // 处理来自网络的确认包
     _handleAckMessage(mtype, seq, peerInfo, message) {
-      // console.log("onMessage: ", res)
       let data = {
         seq: seq,
         message: message,
@@ -713,22 +714,20 @@
         peerId: peerInfo.peerId,
         iPint: utils.Ip2Int(peerInfo.address),
       };
-      /*
-          switch (mtype) {
-            case rMsgType['A_SYNCS']:
-              break;
-            case rMsgType['A_LOCAL']:
-              break;
-            case rMsgType['A_BEGIN']:
-              break;
-            case rMsgType['A_DOING']:
-              break;
-            case rMsgType['A_DONED']:
-              break;
-            default:
-              break;
-          }
-      */
+      switch (mtype) {
+        case rMsgType['A_SYNCS']:
+          break;
+        case rMsgType['A_LOCAL']:
+          break;
+        case rMsgType['A_BEGIN']:
+          break;
+        case rMsgType['A_DOING']:
+          break;
+        case rMsgType['A_DONED']:
+          break;
+        default:
+          break;
+      }
       let event_id = peerInfo.peerId + ':' + seq
       data.type = MsgType[mtype];
       this.packer.del(seq);
@@ -833,7 +832,7 @@
         port: port
       };
       this.online[address] = id;
-      console.log("sync +++: ", this.online[id]);
+      console.log("addOnline +++: ", this.online[id]);
       return this.online[id];
     }
     // 删除下线用户id
@@ -843,7 +842,7 @@
         delete this.online[id];
         delete this.online[one.address];
         this.online.length--;
-        console.log("sync --: ", one);
+        console.log("delOnline --: ", one);
       }
       return one;
     }
