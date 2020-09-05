@@ -73,7 +73,7 @@
     "A_BEGIN|A_DOING|A_DONED": 142, // 130 | 132 | 136,
   }
 
-
+  const PACK_SIZE = WAN_PACK_SIZE;
 
   // 标志位
   // 同步数据包
@@ -233,6 +233,78 @@
     }
   }
 
+  /**
+   * package 解析器
+   */
+  class Package {
+    constructor(type, dup, qos, pkg) {
+      this.header = null;
+      this.buffer = null;
+      if (type && "Number" === utils.Type(type)) {
+        this.header = new Header(type, dup, qos);
+      }
+      if (pkg && "Object" === utils.Type(pkg)) {
+        this.id = Number(pkg.id);
+        this.seq = pkg.seq;
+        let payload = this.serialize(pkg.payload)
+        // 数据包大小处理, 截取前 PACK_SIZE
+        if (payload && (payload.length > PACK_SIZE)) {
+          payload = payload.slice(0, PACK_SIZE);
+        }
+        this.payload = payload;
+        this.encode(type, payload);
+      }
+    }
+
+    // 编码数据包结构
+    encode(type, payload) {
+      let msg = new Messge();
+      msg.writeNumber(type, 1);        // 消息类型，1byte
+      msg.writeNumber(this.seq, 4);    // 消息数据包序号 4byte
+      msg.writeNumber(0x0, 2);         // 消息checksum 2byte
+      msg.writeString(payload);        // 消息内容
+      this.checksum = utils.Crc16(msg.toBytes());
+      msg.setNumber(this.checksum, 2, 5);     // 消息checksum 2byte
+      this.buffer = msg.buffer
+    }
+
+    // 解码数据包
+    static decode(buffer) {
+      let pkg = new Package()
+      pkg.buffer = buffer;
+      let msg = new Messge(buffer);
+      pkg.header = Header.New(msg.readNumber(1));  // 消息类型，1byte
+      pkg.seq = msg.readNumber(4);                 // 消息数据包序号 4byte
+      pkg.checksum = msg.readNumber(2);            // 消息checksum 2byte
+      pkg.payload = msg.readString();              // 消息内容
+      return pkg
+    }
+
+    // serialize the data
+    serialize(data) {
+      let type = utils.Type(data);
+      switch (type) {
+        case "Number":
+          return data;
+        case "String":
+          return data;
+        case "Array":
+        case "Object":
+          return JSON.stringify(data)
+        case "Boolean":
+          return (data === true) ? 1 : 0;
+        case "Undefined":
+        case "Null":
+          return '';
+        default:
+          return '';
+      }
+    }
+    // unserialize the data
+    unserialize(data) {
+      return JSON.parse(data)
+    }
+  }
 
   const BEGIN = 0x0
   const DOING = 0x1
@@ -782,6 +854,16 @@
     // 向某个ip:port发送类型mtype的消息data
     send(fd, ip, port, mtype, payload) {
       let self = this;
+      let pkg = {
+        id: this.id,
+        payload: payload,
+        seq: 1,
+      }
+      let pack = new Package(mtype, 0, 0, pkg);
+      console.log(pack);
+      let pkg2 = Package.decode(pack.buffer);
+      console.log(pkg2);
+
       console.log(fd, self.fdinfo(fd))
       let PACK_SIZE = utils.IsLanIP(ip) ? WAN_PACK_SIZE : LAN_PACK_SIZE;
       return new Promise((resolver, reject) => {

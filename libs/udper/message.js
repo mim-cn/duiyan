@@ -29,24 +29,26 @@
    * @param {Number} size : 1 2 4 byte
    * @param {Boolean} flag 
    */
-  const number2IntArray = (num, size, flag) => {
-    let arr = null
+  const number2IntArray = (buffer, num, size, offset, flag) => {
     size = size ? size : 1
+    offset = offset || 0
+    buffer = buffer || new ArrayBuffer(size);
+    let dv = new DataView(buffer);
     switch (size) {
       case 1:
-        arr = (flag == true) ? (new Int8Array([num]).buffer) : new Uint8Array([num]).buffer
+        (flag == true) ? dv.setInt8(offset, num) : dv.setUint8(offset, num);
         break;
       case 2:
-        arr = (flag == true) ? (new Int16Array([num]).buffer) : new Uint16Array([num]).buffer
+        (flag == true) ? dv.setInt16(offset, num) : dv.setUint16(offset, num);
         break;
       case 4:
-        arr = (flag == true) ? (new Int32Array([num]).buffer) : new Uint32Array([num]).buffer
+        (flag == true) ? dv.setInt32(offset, num) : dv.setUint32(offset, num);
         break;
       default:
-        arr = (flag == true) ? (new Int8Array([num]).buffer) : new Uint8Array([num]).buffer
+        (flag == true) ? dv.setInt8(offset, num) : dv.setUint8(offset, num);
         break
     }
-    return arr
+    return buffer
   }
 
   /**
@@ -55,22 +57,22 @@
    * @param {Number} size : 1 2 4 byte
    * @param {Boolean} flag 
    */
-  const intArray2Number = (arr, size, flag) => {
+  const intArray2Number = (buffer, size, flag) => {
     let num = 0
     size = size ? size : 1
-    let buffer = new Uint8Array(arr).buffer
+    let dv = new DataView(buffer);
     switch (size) {
       case 1:
-        num = (flag == true) ? (new int8Array(buffer)[0]) : new Uint8Array(buffer)[0]
+        num = (flag == true) ? dv.getInt8() : dv.getUint8();
         break;
       case 2:
-        num = (flag == true) ? (new Int16Array(buffer)[0]) : new Uint16Array(buffer)[0]
+        num = (flag == true) ? dv.getInt16() : dv.getUint16();
         break;
       case 4:
-        num = (flag == true) ? (new Int32Array(buffer)[0]) : new Uint32Array(buffer)[0]
+        num = (flag == true) ? dv.getInt32() : dv.getUint32();
         break;
       default:
-        num = (flag == true) ? (new int8Array(buffer)[0]) : new Uint8Array(buffer)[0]
+        num = (flag == true) ? dv.getInt8() : dv.getUint8();
         break
     }
     return num
@@ -113,15 +115,19 @@
       this.offset = 0;
     }
 
+    setNumber(num, size, offset, flag) {
+      size = size ? size : 1
+      this.buffer = number2IntArray(this.buffer, num, size, offset, flag);      
+    }
     /**
      * 将数字写入buffer
      * @param {Number} num 
-     * @param {Number} offset 1 2 4, byte
+     * @param {Number} size 1 2 4, byte
      * @param {Boolean} flag 
      */
-    writeNumber(num, offset, flag) {
-      offset = offset ? offset : 1;
-      let arr = number2IntArray(num, offset, flag);
+    writeNumber(num, size, flag) {
+      size = size ? size : 1;
+      let arr = number2IntArray(null, num, size, 0, flag);
       this.buffer = this.buffer ? mergeArrayBuffer(this.buffer, arr) : arr;
       return true
     }
@@ -164,11 +170,11 @@
      * @param {Number} offset 1 2 4, byte
      * @param {Boolean} flag 
      */
-    readNumber(offset, flag) {
-      offset = offset ? offset : 1;
-      let arr = this.buffer.slice(this.offset, this.offset + offset);
-      this.offset += offset;
-      return intArray2Number(arr, offset, flag);
+    readNumber(size, flag) {
+      size = size ? size : 1;
+      let arr = this.buffer.slice(this.offset, this.offset + size);
+      this.offset += size;
+      return intArray2Number(arr, size, flag);
     }
 
     /**
@@ -198,6 +204,9 @@
       } catch (e) {
         return {}
       }
+    }
+    toBytes() {
+      return new Uint8Array(this.buffer);
     }
   }
 
