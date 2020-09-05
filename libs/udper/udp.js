@@ -73,6 +73,8 @@
     "A_BEGIN|A_DOING|A_DONED": 142, // 130 | 132 | 136,
   }
 
+
+
   // 标志位
   // 同步数据包
   const FSYNC = rMsgType['SYNCS']
@@ -228,6 +230,235 @@
         }
       }
       return has == false ? -1 : 0
+    }
+  }
+
+
+  const BEGIN = 0x0
+  const DOING = 0x1
+  const DONED = 0x2
+  const BDD = 0x3
+
+  const ABEGIN = 0x80
+  const ADOING = 0x81
+  const ADONED = 0x82
+  const ABDD = 0x83
+
+  // header反消息类型
+  const rHeadeType = {
+    "BEGIN": BEGIN,
+    "DOING": DOING,
+    "DONED": DONED,
+    "BEGIN|DOING|DONED": BDD,
+    "A_BEGIN": ABEGIN,
+    "A_DOING": ADOING,
+    "A_DONED": ADONED,
+    "A_BEGIN|A_DOING|A_DONED": ABDD,
+  }
+
+  // header消息类型
+  const HeaderType = {
+    // 发送数据包类型
+    [BEGIN]: "BEGIN",
+    [DOING]: "DOING",
+    [DONED]: "DONED",
+    [BDD]: "BEGIN|DOING|DONED",
+    // 确认数据包类型
+    [ABEGIN]: "A_BEGIN",
+    [ADOING]: "A_DOING",
+    [ADONED]: "A_DONED",
+    [ABDD]: "A_BEGIN|A_DOING|A_DONED"
+  }
+
+  class Header {
+    constructor(type, dup, qos, ack) {
+      this.bits = 0
+      if (!this.invalidType(type)) {
+        throw Error("invalid type", type);
+      }
+      this.setType(type);
+      if (dup && 1 == dup) {
+        this.setDup();
+      }
+      if (qos && 1 == qos) {
+        this.setQos();
+      }
+      if (ack && 1 == ack) {
+        this.setAck();
+      }
+    }
+    // 检测有效的类型
+    invalidType(mtype) {
+      return HeaderType[mtype]
+    }
+    // 设置mtype的每一个bit
+    addType(flag) {
+      return this.bits |= flag
+    }
+    // 设置mtype的每一个bit
+    setType(flag) {
+      this.bits &= 0xfc;
+      return this.bits |= flag
+    }
+    // 设置dup位
+    setDup() {
+      return this.bits |= 0x8
+    }
+    // 设置qos位
+    setQos() {
+      return this.bits |= 0x10;
+    }
+    // 设置ack位
+    setAck() {
+      return this.bits |= 0x80;
+    }
+    // 从数据反构造一个header
+    static New(bits) {
+      let type = (bits & 0x3) | (bits & 0x80)
+      if (!HeaderType[type]) {
+        throw Error("invalid type new", bits);
+      }
+      let dup = (bits & 0x08) >>> 3;
+      let qos = (bits & 0x10) >>> 4;
+      return new Header(type, dup, qos);
+    }
+
+    // header属性
+    Type() {
+      return (this.bits & 0x3) | (this.bits & 0x80);
+    }
+    Dup() {
+      return (this.bits & 0x08) >>> 3;
+    }
+    Qos() {
+      return (this.bits & 0x10) >>> 4;
+    }
+    Ack() {
+      return (this.bits & 0x80) >>> 7;
+    }
+    // 获取header信息
+    info() {
+      return {
+        type: this.Type(), // type
+        dup: this.Dup(),   // dup
+        qos: this.Qos(),   // qos
+        ack: this.Ack(),   // ack
+        str: this.bits.toString(2)
+      }
+    }
+    header() {
+      return this.bits;
+    }
+
+    // 测试
+    static testHeader() {
+      // type test
+      for (let key in rHeadeType) {
+        let head1 = new Header(rHeadeType[key]);
+        console.log("type Tesing info:", head1.info());
+        console.log("type Tesing data:", head1.header());
+        console.log("type Tesing Type:", head1.Type());
+        console.log("type Tesing Qos:", head1.Qos());
+        console.log("type Tesing Dup:", head1.Dup());
+        console.log("type Tesing Ack:", head1.Ack());
+      }
+      // Dup test
+      for (let key in rHeadeType) {
+        let head1 = new Header(rHeadeType[key], 1);
+        console.log("dup Tesing info:", head1.info());
+        console.log("dup Tesing data:", head1.header());
+        console.log("dup Tesing Type:", head1.Type());
+        console.log("dup Tesing Qos:", head1.Qos());
+        console.log("dup Tesing Dup:", head1.Dup());
+        console.log("dup Tesing Ack:", head1.Ack());
+      }
+      // Qos test
+      for (let key in rHeadeType) {
+        let head1 = new Header(rHeadeType[key], 0, 1);
+        console.log("qos Tesing info:", head1.info());
+        console.log("qos Tesing data:", head1.header());
+        console.log("qos Tesing Type:", head1.Type());
+        console.log("qos Tesing Qos:", head1.Qos());
+        console.log("qos Tesing Dup:", head1.Dup());
+        console.log("qos Tesing Ack:", head1.Ack());
+      }
+      // All test
+      for (let key in rHeadeType) {
+        let head1 = new Header(rHeadeType[key], 1, 1);
+        console.log("all Tesing info:", head1.info());
+        console.log("all Tesing data:", head1.header());
+        console.log("all Tesing Type:", head1.Type());
+        console.log("all Tesing Qos:", head1.Qos());
+        console.log("all Tesing Dup:", head1.Dup());
+        console.log("all Tesing Ack:", head1.Ack());
+      }
+      // // test New
+      let header = Header.New(0)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(1)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(2)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(3)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(128)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(129)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(130)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(131)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(8)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(9)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(10)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(11)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(136)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(137)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(138)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(139)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(16)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(17)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(18)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(19)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(144)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(145)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(146)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(147)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(24)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(25)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(26)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(27)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(152)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(153)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(154)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(155)
+      console.log("Tesing new info:", header.info());
+      header = Header.New(156)
+      console.log("Tesing new info:", header.info());
     }
   }
 
@@ -427,6 +658,7 @@
     // 设置非ACK类型消息的header
     setHeader(fd, mtype, size, max_size) {
       let msg = new Messge();
+      let header = new Header(mtype)
       let seq = null
       let fdinfo = this.fdinfo(fd)
       let isn = fdinfo.isn
@@ -443,13 +675,16 @@
             fdinfo['isn'] = seq
             // 消息数据包（小于PACK_SIZE），只用占用一个数据包
             if (size <= max_size) {
+              header.addType(BDD)
               mtype = this.setMtype(mtype, 'DOING|DONED')
             }
           } else {
             seq = this.packer.get(fdinfo['isn'])
             if (size == max_size) { // 传输过程数据包
+              header.setType(DOING);
               mtype = rMsgType['DOING']
             } else { // size < max_size 传输到最后一个数据包
+              header.setType(DONED);
               mtype = rMsgType['DOING|DONED']
             }
           }
@@ -466,6 +701,7 @@
     getHeader(data) {
       let msg = new Messge(data);
       let mtype = msg.readNumber(1);
+      let header = Header.New(mtype)
       let seq = msg.readNumber(4);
       return {
         msg: msg,
@@ -497,20 +733,20 @@
     // 传输管理
 
     // 新建一次新的传输过程，分配一个唯一的fd
-    open(flag) {
+    open(ip, port, flag) {
       this.fds[this.maxfd] = {
+        ip: ip,
+        port: port,
         fd: this.maxfd,
         flag: flag || FB00,
         time: utils.GetTimestamp(),
       }
       return this.maxfd++;
     }
-
     // 关闭一次传输, 释放对应的fd
     close(fd) {
       delete this.fds[fd];
     }
-
     // 通过fd获取对应的信息
     fdinfo(fd) {
       return this.fds[fd];
@@ -582,6 +818,11 @@
     sendById(fd, id, payload) {
       let self = this;
       let info = self.getOthers(id) || [];
+      if (id && info.length > 0) {
+        let fdinfo = self.fdinfo(fd);
+        fdinfo.ip = info[0].address
+        fdinfo.port = info[0].port
+      }
       return Promise.all(info.map((item) => {
         return self.send(fd, item.address, item.port, 2, payload);
       }));
@@ -850,6 +1091,7 @@
 
 
   exports.Udper = Udper;
+  exports.Header = Header;
   // 局域网最大数据包大小
   BaseUdper.prototype.LAN_PACK_SIZE = LAN_PACK_SIZE
   // 广域网最大数据包大小
