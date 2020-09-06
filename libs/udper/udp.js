@@ -1,32 +1,32 @@
 /**
- * header：
+ * format：
+ *         7      6      5      4      3      2      1      0   
+ *     +------+------+------+------+------+------+------+------+
+ *     | ack  |retain|retain|  qos |  dup |retain|     type    |   头部（1byte）
+ *     +------+------+------+------+------+------+------+------+
+ *     |                 Sequence Number(4byte)                |   序列号（4byte）
+ *     +------+------+------+------+------+------+------+------+
+ *     |                    Checksum(2byte)                    |   校验和（2byte）
+ *     +------+------+------+------+------+------+------+------+
+ *     |                      data(nbyte)                      |   数据（nbyte）
+ *     +------+------+------+------+------+------+------+------+
  * 
+ * header：
  *   1 byte 0:
- *     0[0000 0000b]: "SYNCS"  同步局域网内状态  <=>  128[1000 0000b]: "A_SYNCS"  确认同步
- *     1[0000 0001b]: "LOCAL"  定位本设备的信息  <=>  129[1000 0001b]: "A_LOCAL"  确认定位
- *     2[0000 0010b]: "BEGIN"  首次开始数据传输  <=>  130[1000 0010b]: "A_BEGIN"  确认开始
- *     4[0000 0100b]: "DOING"  中间数据传输过程  <=>  132[1000 0100b]: "A_DOING"  确认数据
- *     8[0000 1000b]: "DONED"  结束数据传输过程  <=>  136[1000 1000b]: "A_DONED"  确认结束
- *     NOTE:
- *         1. 业务层需要按照数据的发送状态设置合理的数据包标志，但是如果没有按照合法的设置，存在一定风险，导致数据控制紊乱。
- *         2. 首个数据包、中间数据包、结束数据包允许同时存在（允许也建议 FBDD），可以拆分成 FB00 + F0DD 或 FB00 + F0D0 + F00D
- *         3. 首个数据包不能与中间数据包单独同时存在（禁止 FBD0）
+ *     0[0000 0000b]: "BROAD"  广播局域网内状态  <=>  128[1000 0000b]: "ABROAD"  确认同步
+ *     1[0000 0001b]: "MULTI"  多播的传输数据包  <=>  129[1000 0001b]: "AMULTI"  确认定位
+ *     2[0000 0010b]: "BEGIN"  首次开始数据传输  <=>  130[1000 0010b]: "ABEGIN"  确认开始
+ *     3[0000 0011b]: "DOING"  中间数据传输过程  <=>  131[1000 0011b]: "ADOING"  确认数据
+ *     4[0000 0100b]: "DONED"  结束数据传输过程  <=>  132[1000 0100b]: "ADONED"  确认结束
+ *     5[0000 0101b]: "BDD"    整包数据传输过程  <=>  133[1000 0101b]: "ABDD"    确认整包
+ * seq
  *   4 byte 1 ~ 4:
  *     sequence
+ * checksum
  *   2 byte 5 ~ 6:
- *     send peer id
- *   2 byte 7 ~ 8:
  *     crc16 checksum
- *   n byte 9 ~  wan MAX: 548-7 = 541 ~= 512 ; lan MAX: 1472-7 = 1465 ~= 1024
- *     
- * 
- * version 1.0:
- * 
- *   分段确认: 要么一次数据包全部收到，要么全部丢失
- *     +++++++         seq x, data       +++++++
- *     |  A  |        ------------>      |  B  |
- *     +++++++        <------------      +++++++
- *                        ack x
+ * data
+ *   n byte 7 ~  wan MAX: 548-7 = 541 ~= 512 ; lan MAX: 1472-7 = 1465 ~= 1024
  * 
  */
 (function (g, f) {
@@ -37,6 +37,7 @@
   }
 })(this, function (exports) {
   const utils = require('../common/utils')
+  const cache = require('../common/cache')
   const _event = require('../common/event.js')
   const {
     Messge
@@ -47,85 +48,16 @@
   const RIGHT_MOVE = 11
   const ISN_INTERVAL = 1 << RIGHT_MOVE  // 2048
 
+  const EXPIRE = 60000 // 60s
+
   // 重传机制超时时间
-  const ACK_TIMEOUT = 400
+  const ACK_TIMEOUT = 2000
   // 局域网最大数据包大小
   const LAN_PACK_SIZE = 1024
   // 广域网最大数据包大小
   const WAN_PACK_SIZE = 512
   // 重试次数
   const RETRY = 100
-  // 数据包反消息类型
-  const rMsgType = {
-    "SYNCS": 0,
-    "LOCAL": 1,
-    "BEGIN": 2,
-    "DOING": 4,
-    "DONED": 8,
-    "DOING|DONED": 12, // 4 | 8,
-    "BEGIN|DOING|DONED": 14, // 2 | 4 | 8,
-    "A_SYNCS": 128,
-    "A_LOCAL": 129,
-    "A_BEGIN": 130,
-    "A_DOING": 132,
-    "A_DONED": 136,
-    "A_DOING|A_DONED": 140, // 132 | 136,
-    "A_BEGIN|A_DOING|A_DONED": 142, // 130 | 132 | 136,
-  }
-
-  const PACK_SIZE = WAN_PACK_SIZE;
-
-  // 标志位
-  // 同步数据包
-  const FSYNC = rMsgType['SYNCS']
-  // 定位数据包
-  const FLOCAL = rMsgType['LOCAL']
-  // 首个数据包
-  const FB00 = rMsgType['BEGIN']
-  // 大型数据包中间数据包
-  const F0D0 = rMsgType['DOING']
-  // 结束数据包
-  const F00D = rMsgType['DONED']
-  // 既是中间数据包又是结束数据包， 即rMsgType['DOING'] | rMsgType['DONED']
-  const F0DD = rMsgType['DOING|DONED']
-  // 对于小型数据, 首个数据包既是中间数据包又是最后一个数据包，即rMsgType['BEGIN'] | rMsgType['DOING'] | rMsgType['DONED']
-  const FBDD = rMsgType['BEGIN|DOING|DONED']
-
-  // 确认标志位
-  // 确认同步数据包
-  const A_SYNC = rMsgType['A_SYNCS']
-  // 确认定位数据包
-  const A_LOCAL = rMsgType['A_LOCAL']
-  // 确认首个数据包
-  const A_B00 = rMsgType['A_BEGIN']
-  // 确认大型数据包中间数据包
-  const A_0D0 = rMsgType['A_DOING']
-  // 确认结束数据包
-  const A_00D = rMsgType['A_DONED']
-  // 确认既是中间数据包又是结束数据包，即 rMsgType['A_DOING'] | rMsgType['A_DONED']
-  const A_0DD = rMsgType['A_DOING|A_DONED']
-  // 确认对于小型数据, 首个数据包既是中间数据包又是最后一个数据包，即rMsgType['A_BEGIN'] | rMsgType['A_DOING'] | rMsgType['A_DONED']
-  const A_BDD = rMsgType['A_BEGIN|A_DOING|A_DONED']
-
-  // 数据包消息类型
-  const MsgType = {
-    // 发送数据包类型
-    [FSYNC]: "SYNCS",
-    [FLOCAL]: "LOCAL",
-    [FB00]: "BEGIN",
-    [F0D0]: "DOING",
-    [F00D]: "DONED",
-    [F0DD]: "DOING|DONED",
-    [FBDD]: "BEGIN|DOING|DONED",
-    // 确认数据包类型
-    [A_SYNC]: "A_SYNCS",
-    [A_LOCAL]: "A_LOCAL",
-    [A_B00]: "A_BEGIN",
-    [A_0D0]: "A_DOING",
-    [A_00D]: "A_DONED",
-    [A_0DD]: "A_DOING|A_DONED",
-    [A_BDD]: "A_BEGIN|A_DOING|A_DONED"
-  }
 
   const getInitSeqNumber = (x) => {
     let startISN = function (x) {
@@ -142,7 +74,7 @@
    *     - 数据包控制位的设置与解析
    *     - 数据包数据传输状态的管理
    */
-  class Packer {
+  class SeqManage {
     constructor() {
       /**
        * 表示已使用的isn的起始位，同时意味着该数字后2048个位置，被一定时间占用
@@ -233,115 +165,73 @@
     }
   }
 
-  /**
-   * package 解析器
-   */
-  class Package {
-    constructor(type, dup, qos, pkg) {
-      this.header = null;
-      this.buffer = null;
-      if (type && "Number" === utils.Type(type)) {
-        this.header = new Header(type, dup, qos);
-      }
-      if (pkg && "Object" === utils.Type(pkg)) {
-        this.id = Number(pkg.id);
-        this.seq = pkg.seq;
-        let payload = this.serialize(pkg.payload)
-        // 数据包大小处理, 截取前 PACK_SIZE
-        if (payload && (payload.length > PACK_SIZE)) {
-          payload = payload.slice(0, PACK_SIZE);
-        }
-        this.payload = payload;
-        this.encode(type, payload);
-      }
+  class Stat {
+    constructor() {
+      this.props = {}
     }
-
-    // 编码数据包结构
-    encode(type, payload) {
-      let msg = new Messge();
-      msg.writeNumber(type, 1);        // 消息类型，1byte
-      msg.writeNumber(this.seq, 4);    // 消息数据包序号 4byte
-      msg.writeNumber(0x0, 2);         // 消息checksum 2byte
-      msg.writeString(payload);        // 消息内容
-      this.checksum = utils.Crc16(msg.toBytes());
-      msg.setNumber(this.checksum, 2, 5);     // 消息checksum 2byte
-      this.buffer = msg.buffer
+    incr(key, v) {
+      return this.props[key] ? this.props[key] += (v || 1) : this.props[key] = (v || 1);
     }
-
-    // 解码数据包
-    static decode(buffer) {
-      let pkg = new Package()
-      pkg.buffer = buffer;
-      let msg = new Messge(buffer);
-      pkg.header = Header.New(msg.readNumber(1));  // 消息类型，1byte
-      pkg.seq = msg.readNumber(4);                 // 消息数据包序号 4byte
-      pkg.checksum = msg.readNumber(2);            // 消息checksum 2byte
-      pkg.payload = msg.readString();              // 消息内容
-      return pkg
-    }
-
-    // serialize the data
-    serialize(data) {
-      let type = utils.Type(data);
-      switch (type) {
-        case "Number":
-          return data;
-        case "String":
-          return data;
-        case "Array":
-        case "Object":
-          return JSON.stringify(data)
-        case "Boolean":
-          return (data === true) ? 1 : 0;
-        case "Undefined":
-        case "Null":
-          return '';
-        default:
-          return '';
-      }
-    }
-    // unserialize the data
-    unserialize(data) {
-      return JSON.parse(data)
+    decr(key) {
+      return this.props[key] ? this.props[key]-- : this.props[key] = 0;
     }
   }
 
-  const BEGIN = 0x0
-  const DOING = 0x1
-  const DONED = 0x2
-  const BDD = 0x3
+  const FD_BROAD = 3 // 广播占用fd
+  const FD_MULTI = 4 // 多播占用fd
+  // 数据包类型
+  const BROAD = 0x0  // 广播数据包
+  const MULTI = 0x1  // 多播数据包
+  const BEGIN = 0x2  // 首个数据包
+  const DOING = 0x3  // 大型数据包中间数据包
+  const DONED = 0x4  // 结束数据包
+  const BDD = 0x5    // 对于小型数据, 首个数据包既是中间数据包又是最后一个数据包
 
-  const ABEGIN = 0x80
-  const ADOING = 0x81
-  const ADONED = 0x82
-  const ABDD = 0x83
+  // 确认数据包
+  const ABROAD = 0x80 | BROAD  // 广播数据包
+  const AMULTI = 0x80 | MULTI  // 多播数据包
+  const ABEGIN = 0x80 | BEGIN  // 首个数据包
+  const ADOING = 0x80 | DOING  // 大型数据包中间数据包
+  const ADONED = 0x80 | DONED  // 结束数据包
+  const ABDD = 0x80 | BDD  // 对于小型数据, 首个数据包既是中间数据包又是最后一个数据包
 
   // header反消息类型
-  const rHeadeType = {
+  const rHeaderType = {
+    "BROAD": BROAD,
+    "MULTI": MULTI,
     "BEGIN": BEGIN,
     "DOING": DOING,
     "DONED": DONED,
-    "BEGIN|DOING|DONED": BDD,
-    "A_BEGIN": ABEGIN,
-    "A_DOING": ADOING,
-    "A_DONED": ADONED,
-    "A_BEGIN|A_DOING|A_DONED": ABDD,
+    "BDD": BDD,
+    "ABROAD": ABROAD,
+    "AMULTI": AMULTI,
+    "ABEGIN": ABEGIN,
+    "ADOING": ADOING,
+    "ADONED": ADONED,
+    "ABDD": ABDD,
   }
 
   // header消息类型
   const HeaderType = {
     // 发送数据包类型
+    [BROAD]: "BROAD",
+    [MULTI]: "MULTI",
     [BEGIN]: "BEGIN",
     [DOING]: "DOING",
     [DONED]: "DONED",
-    [BDD]: "BEGIN|DOING|DONED",
+    [BDD]: "BDD",
     // 确认数据包类型
-    [ABEGIN]: "A_BEGIN",
-    [ADOING]: "A_DOING",
-    [ADONED]: "A_DONED",
-    [ABDD]: "A_BEGIN|A_DOING|A_DONED"
+    [ABROAD]: "ABROAD",
+    [AMULTI]: "AMULTI",
+    [ABEGIN]: "ABEGIN",
+    [ADOING]: "ADOING",
+    [ADONED]: "ADONED",
+    [ABDD]: "ABDD"
   }
 
+  /**
+   * 数据包头解析
+   */
   class Header {
     constructor(type, dup, qos, ack) {
       this.bits = 0
@@ -349,15 +239,9 @@
         throw Error("invalid type", type);
       }
       this.setType(type);
-      if (dup && 1 == dup) {
-        this.setDup();
-      }
-      if (qos && 1 == qos) {
-        this.setQos();
-      }
-      if (ack && 1 == ack) {
-        this.setAck();
-      }
+      (dup === 1) ? this.setDup(dup) : null;
+      (qos === 1) ? this.setQos(qos) : null;
+      (ack === 1) ? this.setAck(ack) : null;
     }
     // 检测有效的类型
     invalidType(mtype) {
@@ -372,21 +256,21 @@
       this.bits &= 0xfc;
       return this.bits |= flag
     }
-    // 设置dup位
-    setDup() {
-      return this.bits |= 0x8
+    // 设置dup位(4)
+    setDup(flag) {
+      return (1 === flag) ? this.bits |= 0x08 : ((0 === flag) ? this.bits &= 0xf7 : this.bits);
     }
-    // 设置qos位
-    setQos() {
-      return this.bits |= 0x10;
+    // 设置qos位(5)
+    setQos(flag) {
+      return (1 === flag) ? this.bits |= 0x10 : ((0 === flag) ? this.bits &= 0xef : this.bits);
     }
-    // 设置ack位
-    setAck() {
-      return this.bits |= 0x80;
+    // 设置ack位(7)
+    setAck(flag) {
+      return (1 === flag) ? this.bits |= 0x80 : ((0 === flag) ? this.bits &= 0x7f : this.bits);
     }
     // 从数据反构造一个header
     static New(bits) {
-      let type = (bits & 0x3) | (bits & 0x80)
+      let type = (bits & 0x7) | (bits & 0x80)
       if (!HeaderType[type]) {
         throw Error("invalid type new", bits);
       }
@@ -397,7 +281,7 @@
 
     // header属性
     Type() {
-      return (this.bits & 0x3) | (this.bits & 0x80);
+      return (this.bits & 0x7) | (this.bits & 0x80);
     }
     Dup() {
       return (this.bits & 0x08) >>> 3;
@@ -415,7 +299,8 @@
         dup: this.Dup(),   // dup
         qos: this.Qos(),   // qos
         ack: this.Ack(),   // ack
-        str: this.bits.toString(2)
+        str: this.bits.toString(2),
+        desc: HeaderType[this.Type()],
       }
     }
     header() {
@@ -425,8 +310,10 @@
     // 测试
     static testHeader() {
       // type test
+      let heads = []
       for (let key in rHeadeType) {
         let head1 = new Header(rHeadeType[key]);
+        heads.push(head1.header());
         console.log("type Tesing info:", head1.info());
         console.log("type Tesing data:", head1.header());
         console.log("type Tesing Type:", head1.Type());
@@ -437,6 +324,7 @@
       // Dup test
       for (let key in rHeadeType) {
         let head1 = new Header(rHeadeType[key], 1);
+        heads.push(head1.header());
         console.log("dup Tesing info:", head1.info());
         console.log("dup Tesing data:", head1.header());
         console.log("dup Tesing Type:", head1.Type());
@@ -447,6 +335,7 @@
       // Qos test
       for (let key in rHeadeType) {
         let head1 = new Header(rHeadeType[key], 0, 1);
+        heads.push(head1.header());
         console.log("qos Tesing info:", head1.info());
         console.log("qos Tesing data:", head1.header());
         console.log("qos Tesing Type:", head1.Type());
@@ -457,6 +346,7 @@
       // All test
       for (let key in rHeadeType) {
         let head1 = new Header(rHeadeType[key], 1, 1);
+        heads.push(head1.header());
         console.log("all Tesing info:", head1.info());
         console.log("all Tesing data:", head1.header());
         console.log("all Tesing Type:", head1.Type());
@@ -464,134 +354,93 @@
         console.log("all Tesing Dup:", head1.Dup());
         console.log("all Tesing Ack:", head1.Ack());
       }
-      // // test New
-      let header = Header.New(0)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(1)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(2)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(3)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(128)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(129)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(130)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(131)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(8)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(9)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(10)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(11)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(136)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(137)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(138)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(139)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(16)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(17)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(18)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(19)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(144)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(145)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(146)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(147)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(24)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(25)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(26)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(27)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(152)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(153)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(154)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(155)
-      console.log("Tesing new info:", header.info());
-      header = Header.New(156)
-      console.log("Tesing new info:", header.info());
+      // test New
+      for (let i in heads) {
+        let header = Header.New(heads[i])
+        console.log("Tesing new info:", header.info());
+      }
+    }
+  }
+
+  /**
+   * package 解析器
+   */
+  class Package {
+    constructor(type, dup, qos, ack, pkg) {
+      this.header = null;
+      this.buffer = null;
+      if ("Number" === utils.Type(type)) {
+        this.header = new Header(type, dup, qos, ack);
+      }
+      if (pkg && "Object" === utils.Type(pkg)) {
+        this.seq = pkg.seq;
+        this.payload = pkg.payload || "";
+        this.build(this.header.header(), this.seq, this.payload);
+      }
+    }
+
+    // 构建pack
+    build(header, seq, payload) {
+      let [msg, checksum] = Package.pack(header, seq, payload);
+      this.buffer = msg.buffer
+      this.checksum = checksum
+    }
+
+    // 设置header的标志位
+    setFlags(dup, qos, ack) {
+      let s0 = (dup !== this.header.Dup()) ? this.header.setDup(dup) : null;
+      let s1 = (qos !== this.header.Qos()) ? this.header.setQos(qos) : null;
+      let s2 = (ack !== this.header.Ack()) ? this.header.setAck(ack) : null;
+      if (s0 || s1 || s2) {
+        this.build(this.header.header(), this.seq, this.payload);
+      }
+    }
+
+    // 编码数据包结构
+    static pack(header, seq, payload) {
+      let msg = new Messge();
+      msg.writeNumber(header, 1);      // 消息类型，1byte
+      msg.writeNumber(seq, 4);         // 消息数据包序号 4byte
+      msg.writeNumber(0x0, 2);         // 消息checksum 2byte
+      msg.writeString(payload);        // 消息内容
+      let checksum = utils.Crc16(msg.toBytes());
+      msg.setNumber(checksum, 2, 5);   // 消息checksum 2byte
+      return [msg, checksum];
+    }
+
+    // 解码数据包
+    static unpack(buffer) {
+      let pkg = new Package();
+      pkg.buffer = buffer;
+      let msg = new Messge(buffer);
+      pkg.header = Header.New(msg.readNumber(1));  // 消息类型，1byte
+      pkg.seq = msg.readNumber(4);                 // 消息数据包序号 4byte
+      pkg.checksum = msg.readNumber(2);            // 消息checksum 2byte
+      pkg.payload = msg.readString();              // 消息内容
+      msg.setNumber(0, 2, 5);
+      let checksum = utils.Crc16(msg.toBytes());
+      return (checksum == pkg.checksum) ? pkg : null;
     }
   }
 
   const InitFd = () => {
     return {
-      3: {
-        fd: 3,
-        flag: FSYNC,
+      [FD_BROAD]: {
+        fd: FD_BROAD,
+        flag: BROAD,
         time: utils.GetTimestamp(),
       },
-      4: {
-        fd: 4,
-        flag: FLOCAL,
+      [FD_MULTI]: {
+        fd: FD_MULTI,
+        flag: MULTI,
         time: utils.GetTimestamp(),
       }
     }
   }
 
-  // 基于wx.UDPSocket的基础类
-  class BaseUdper {
+  class UdpBase {
     constructor(port) {
-      // 用于udp通信时的事件通知
-      this.$e = _event
-      // udp通信绑定的port，默认5328
-      this.bport = port;
-      // 文件描述符表
-      this.fds = InitFd()
-      /**
-       * 0 1 2 标准输入 标准输出 标准错误
-       * 3 同步数据 占用
-       * 4 定位数据 占用
-       * 传输数据从5 开始使用
-       */
-      this.maxfd = 5
-      this.timer = {}
-      this.packer = new Packer();
-      this.recver = {}
-      // 获取随机分配的设备id，用于唯一标识
-      this.id = this.getId();
       this.create(port);
-    }
-
-    // 私有方法
-    _send(ip, port, msg) {
-      return this.udper.send({ address: ip, port: port, message: msg });
-    }
-    // 错误处理
-    error(msg) {
-      throw new Error(msg);
-    }
-
-    // 初始化udp相关回调
-    init() {
-      if (this.udper) {
-        this.onListening();
-        this.offListening();
-        this.onMessage();
-        this.offMessage();
-        this.onClose();
-        this.offClose();
-      }
     }
     create(port) {
       try {
@@ -599,34 +448,8 @@
         this.udper.bind(port);
       } catch (e) {
         console.error(e);
+        throw Error("create udp socket error!!!");
       }
-    }
-    getId() {
-      let id = null
-      try {
-        var res = wx.getStorageSync('LOCAL')
-        if (res) {
-          id = res.id
-        } else {
-          id = utils.RandomNum(0, IDMAX)
-          wx.setStorage({
-            data: {
-              id: id
-            },
-            key: 'LOCAL',
-          })
-        }
-      } catch (e) {
-        id = utils.RandomNum(0, IDMAX)
-        wx.setStorage({
-          data: {
-            id: id
-          },
-          key: 'LOCAL',
-        })
-      }
-      id = utils.Pad(id, IDLEN)
-      return id
     }
     onClose() {
       return new Promise((resolver) => {
@@ -700,6 +523,73 @@
         this.udper.offMessage(function () { });
       });
     }
+  }
+
+  // 基于wx.UDPSocket的基础类
+  class BaseUdper extends UdpBase {
+    constructor(port) {
+      super(port);
+      // 用于udp通信时的事件通知
+      this.$e = _event
+      // udp通信绑定的port，默认5328
+      this.bport = port;
+      // 文件描述符表
+      this.fds = InitFd()
+      /**
+       * 0 1 2 标准输入 标准输出 标准错误
+       * 3 广播数据包 占用
+       * 4 多播数据包 占用
+       * 传输数据从5 开始使用
+       */
+      this.maxfd = 5
+      this.timer = {}
+      this.seqer = new SeqManage();
+      this.recver = {}
+      this.stat = new Stat();
+      // 获取随机分配的设备id，用于唯一标识
+      this.id = this.getId();
+    }
+
+    // 获取分配的随机id
+    getId() {
+      let id = null
+      try {
+        let res = cache.get('LOCAL');
+        if (res) {
+          id = res
+        } else {
+          id = utils.RandomNum(0, IDMAX)
+          cache.set('LOCAL', id, EXPIRE);
+        }
+      } catch (e) {
+        id = utils.RandomNum(0, IDMAX)
+        cache.set('LOCAL', id, EXPIRE);
+      }
+      id = utils.Pad(id, IDLEN)
+      return id
+    }
+
+    // 私有方法
+    _send(ip, port, msg) {
+      return this.udper.send({ address: ip, port: port, message: msg });
+    }
+    // 错误处理
+    error(msg) {
+      throw new Error(msg);
+    }
+
+    // 初始化udp相关回调
+    init() {
+      if (this.udper) {
+        this.onListening();
+        this.offListening();
+        this.onMessage();
+        this.offMessage();
+        this.onClose();
+        this.offClose();
+      }
+    }
+
 
     // 消息处理
 
@@ -707,99 +597,13 @@
     onMessage() {
       let self = this;
       self.udper.onMessage(function (res) {
-        let { mtype, seq, peerInfo, data } = self.getData(res.remoteInfo, res.message)
-        if (mtype < rMsgType["A_SYNCS"]) {
+        let { mtype, seq, peerInfo, data } = self.decode(res.remoteInfo, res.message);
+        if (mtype < ABROAD) {
           self._handleOnMessage(mtype, seq, peerInfo, data)
         } else {
           self._handleAckMessage(mtype, seq, peerInfo, data)
         }
       });
-    }
-    // 检测有效的类型
-    invalidMtype(mtype) {
-      return MsgType[mtype]
-    }
-    // 设置mtype的每一个bit
-    setMtype(mtype, flag) {
-      return mtype |= rMsgType[flag]
-    }
-    // 设置mtype的每一个bit
-    getMtype(mtype, flag) {
-      return mtype & rMsgType[flag]
-    }
-    // 设置非ACK类型消息的header
-    setHeader(fd, mtype, size, max_size) {
-      let msg = new Messge();
-      let header = new Header(mtype)
-      let seq = null
-      let fdinfo = this.fdinfo(fd)
-      let isn = fdinfo.isn
-      switch (mtype) {
-        case rMsgType['SYNCS']:
-        case rMsgType['LOCAL']:
-          seq = this.packer.malloc(1)
-          fdinfo['isn'] = seq
-          break;
-        case rMsgType['BEGIN']:
-          // 首个数据包，将申请一个新的isn
-          if (!isn) {
-            seq = this.packer.malloc()
-            fdinfo['isn'] = seq
-            // 消息数据包（小于PACK_SIZE），只用占用一个数据包
-            if (size <= max_size) {
-              header.addType(BDD)
-              mtype = this.setMtype(mtype, 'DOING|DONED')
-            }
-          } else {
-            seq = this.packer.get(fdinfo['isn'])
-            if (size == max_size) { // 传输过程数据包
-              header.setType(DOING);
-              mtype = rMsgType['DOING']
-            } else { // size < max_size 传输到最后一个数据包
-              header.setType(DONED);
-              mtype = rMsgType['DOING|DONED']
-            }
-          }
-          break;
-        default:
-          break;
-      }
-      msg.writeNumber(mtype, 1);   // 消息类型，1byte
-      msg.writeNumber(seq, 4);     // 消息数据包序号 4byte      
-      msg.writeNumber(this.id, 2); // 发送端id  2byte
-      return { msg: msg, seq: seq };
-    }
-    // 从获取的数据解析header，与set_header对应
-    getHeader(data) {
-      let msg = new Messge(data);
-      let mtype = msg.readNumber(1);
-      let header = Header.New(mtype)
-      let seq = msg.readNumber(4);
-      return {
-        msg: msg,
-        mtype: mtype,
-        seq: seq,
-        peerId: utils.Pad(msg.readNumber(2), IDLEN),
-      }
-    }
-    // 生成发送的数据包
-    setData(fd, mtype, data, max_size) {
-      data = this.serialize(data)
-      // 数据包大小处理, 截取前 max_size, PACK_SIZE
-      if (data && (data.length > max_size)) {
-        data = data.slice(0, max_size);
-      }
-      let { msg, seq } = this.setHeader(fd, mtype, data.length, max_size);
-      msg.writeString(data); // 消息内容
-      return { msg: msg.buffer, seq: seq, size: data.length };
-    }
-    // 解析收到的的数据包
-    getData(peer, dat) {
-      let { msg, mtype, seq, peerId } = this.getHeader(dat);
-      let data = msg.readString(); // 消息内容
-      let peerInfo = peer || {}
-      peerInfo.peerId = peerId
-      return { mtype: mtype, seq: seq, peerInfo: peerInfo, data: data }
     }
 
     // 传输管理
@@ -810,7 +614,7 @@
         ip: ip,
         port: port,
         fd: this.maxfd,
-        flag: flag || FB00,
+        flag: flag || BEGIN,
         time: utils.GetTimestamp(),
       }
       return this.maxfd++;
@@ -820,94 +624,167 @@
       delete this.fds[fd];
     }
     // 通过fd获取对应的信息
-    fdinfo(fd) {
+    fstat(fd) {
       return this.fds[fd];
     }
 
-    // 生成发送的数据包
-    setAckData(mtype, data, seq) {
-      data = this.serialize(data)
-      let msg = new Messge();
-      msg.writeNumber(mtype, 1);   // 消息类型，1byte
-      msg.writeNumber(seq, 4);     // 消息数据包序号 4byte      
-      msg.writeNumber(this.id, 2); // 发送端id  2byte      
-      msg.writeString(data);       // 消息内容
-      return { msg: msg.buffer, seq: seq, size: data.length };
+    // 根据传输过程和payload调整数据包类型
+    encode(fd, mtype, a_seq, payload, max_size) {
+      // STAT 统计发送数据包个数
+      this.stat.incr('pgc');
+      let seq = 0
+      let data = this.serialize(payload)
+      if (data && (data.length > max_size)) {
+        data = data.slice(0, max_size);
+      }
+      let size = data.length;
+      // 确认包
+      if (a_seq !== null) {
+        this.stat.incr('ackpgc');
+        let pkg = { seq: a_seq, size: size, type: mtype, payload: data }
+        let pack = new Package(mtype, 0, 0, 1, pkg);
+        return { seq: a_seq, size: size, type: pack.header.Type(), pack: pack }
+      }
+      // 数据包
+      let fstat = this.fstat(fd)
+      let isn = fstat.isn
+      switch (mtype) {
+        case BEGIN:
+          // 首个数据包，将申请一个新的isn
+          if (!isn) {
+            seq = this.seqer.malloc();
+            fstat['isn'] = seq;
+            // 消息数据包（小于PACK_SIZE），只用占用一个数据包
+            if (size <= max_size) {
+              mtype = BDD;
+              // STAT 统计发送小型数据包个数
+              this.stat.incr('spgc');
+            } else {
+              // STAT 统计发送非小型数据包个数
+              this.stat.incr('nspgc');
+              mtype = BEGIN;
+            }
+          } else {
+            seq = this.seqer.get(fstat['isn']);
+            // size == max_size 传输过程数据包
+            // size <  max_size 传输到最后一个数据包
+            mtype = (size == max_size) ? DOING : DONED;
+          }
+          break;
+        case BROAD:
+        case MULTI:
+          seq = this.seqer.malloc(1);
+          fstat['isn'] = seq;
+          break;
+        default:
+          throw Error("encode invalid type");
+      }
+      let pkg = { seq: seq, size: size, type: mtype, payload: data }
+      let pack = new Package(mtype, 0, 0, 0, pkg);
+      return { seq: seq, size: size, type: mtype, pack: pack }
+    }
+
+    decode(peer, buffer) {
+      let pkg = Package.unpack(buffer);
+      // STAT 统计接收数据包个数，错误数据包个数
+      pkg ? this.stat.incr('rpgc') : this.stat.incr('erpgc');
+      console.log(pkg);
+      let payload = pkg.payload, mtype = pkg.header.Type(), seq = pkg.seq;
+      // STAT 统计接收小型数据包个数
+      (mtype === BDD) ? this.stat.incr('rspgc') : null;
+      // STAT 统计接收非小型数据包个数
+      (mtype === BEGIN) ? this.stat.incr('rnspgc') : null;
+      // STAT 统计接收非小型数据包个数
+      (mtype >= ABROAD) ? this.stat.incr('rackpgc') : null;
+      this.event.emit("kudp-stat", this.statist());
+      return { mtype: mtype, seq: seq, peerInfo: (peer || {}), data: payload }
     }
 
     // 由于数据包会再未收到对应ACK包时会重传，针对ACK包无需设置超时重传
     sendAck(ip, port, mtype, a_seq) {
       let self = this;
-      let amtype = this.setMtype(mtype, 'A_SYNCS');
       return new Promise((resolver, reject) => {
-        if (!self.invalidMtype(amtype)) {
-          reject({ peerIp: ip, peerPort: port, err: 'INVALID MESSAGE TYPE: ' + amtype });
+        try {
+          // 编码数据包
+          let { seq, size, type, pack } = self.encode(null, mtype, a_seq, '', null);
+          // 调用发送
+          self._send(ip, port, pack.buffer)
+          resolver({ err: 'ok', size: size, seq: seq, type: type, peerIp: ip, peerPort: port });
+        } catch (e) {
+          console.error(e);
+          reject(e);
         }
-        // 生成代发送的数据包 seq 只有再Ack包是传入
-        let { msg, seq, size } = self.setAckData(amtype, '', a_seq);
-        // 调用发送
-        self._send(ip, port, msg)
-        resolver({ err: 'ok', size: size, seq: seq, peerIp: ip, peerPort: port });
       });
     }
 
     // 向某个ip:port发送类型mtype的消息data
     send(fd, ip, port, mtype, payload) {
       let self = this;
-      let pkg = {
-        id: this.id,
-        payload: payload,
-        seq: 1,
-      }
-      let pack = new Package(mtype, 0, 0, pkg);
-      console.log(pack);
-      let pkg2 = Package.decode(pack.buffer);
-      console.log(pkg2);
-
-      console.log(fd, self.fdinfo(fd))
       let PACK_SIZE = utils.IsLanIP(ip) ? WAN_PACK_SIZE : LAN_PACK_SIZE;
       return new Promise((resolver, reject) => {
-        if (!self.invalidMtype(mtype)) {
-          reject({ err: 'INVALID MESSAGE TYPE: ' + mtype, peerIp: ip, peerPort: port });
-        }
-        // 生成代发送的数据包 seq 只有再Ack包是传入
-        let { msg, seq, size } = self.setData(fd, mtype, payload, PACK_SIZE);
-        // 设置超时定时器                
-        let intervalID = setInterval(function () {
-          console.log('retry send', mtype, ip, port)
-          if (self.retry++ < RETRY) {
-            self._send(ip, port, msg)
-          } else {
-            clearInterval(intervalID);
-            delete self.timer[seq];
+        try {
+          // 编码数据包
+          let { seq, size, type, pack } = self.encode(fd, mtype, null, payload, PACK_SIZE);
+          // TODO: 广播，多播 是否需要重传？
+          if (type > MULTI) {
+            // 设置超时定时器
+            let intervalID = setInterval(function () {
+              console.log('retry send', type, ip, port, pack)
+              // STAT 统计接重复发送数据包个数
+              if (self.stat.incr('dup') < RETRY) {
+                pack.setFlags(1, 0, 0);
+                self.stat.incr('pgc');
+                // STAT 统计接收小型数据包个数(dup)
+                (pack.header.Type() === BDD) ? self.stat.incr('spgc') : null;
+                // STAT 统计接收非小型数据包个数(dup)
+                (pack.header.Type() === BEGIN) ? self.stat.incr('nspgc') : null;
+                self._send(ip, port, pack.buffer)
+              } else {
+                clearInterval(intervalID);
+                delete self.timer[seq];
+              }
+            }, ACK_TIMEOUT);
+            self.timer[seq] = { ip: ip, seq: seq, id: intervalID, }
+            // 定义事件通知
+            let event_id = utils.Ip2Int(ip) + ':' + seq
+            self.$e.on1(event_id, self, res => {
+              console.log('ack:', res);
+              clearInterval(intervalID);
+              delete self.timer[seq];
+            });
           }
-        }, ACK_TIMEOUT);
-        self.timer[seq] = { ip: ip, seq: seq, id: intervalID, }
-        // 定义事件通知
-        let event_id = self.online[ip] + ':' + seq
-        self.$e.on1(event_id, self, res => {
-          console.log('ack:', res);
-          self.retry = 0;
-          clearInterval(intervalID);
-          delete self.timer[seq];
-        });
-        // 调用发送
-        self._send(ip, port, msg)
-        resolver({ err: 'ok', size: size, seq: seq, peerIp: ip, peerPort: port });
+          // 调用发送
+          self._send(ip, port, pack.buffer)
+          resolver({ err: 'ok', size: size, seq: seq, type: type, peerIp: ip, peerPort: port });
+        } catch (e) {
+          console.error(e);
+          reject(e);
+        }
       });
     }
+
     // 通过id发送mtype消息的数据data
     sendById(fd, id, payload) {
       let self = this;
       let info = self.getOthers(id) || [];
       if (id && info.length > 0) {
-        let fdinfo = self.fdinfo(fd);
-        fdinfo.ip = info[0].address
-        fdinfo.port = info[0].port
+        let fstat = self.fstat(fd);
+        fstat.ip = info[0].address
+        fstat.port = info[0].port
       }
       return Promise.all(info.map((item) => {
-        return self.send(fd, item.address, item.port, 2, payload);
+        return self.send(fd, item.address, item.port, BEGIN, payload);
       }));
+    }
+
+    // 广播数据包
+    broadcast(payload) {
+      return this.send(FD_BROAD, '255.255.255.255', this.bport, BROAD, payload || "");
+    }
+
+    // 组播多播数据包 TODO
+    multicast(payload) {
+      return this.send(FD_MULTI, '255.255.255.255', this.bport, MULTI, payload || "");
     }
 
     // 数据处理工具
@@ -943,11 +820,10 @@
       super(port)
       // 用于与业务层的事件通知，将通知上报到业务层
       this.event = event;
-      this.isn = getInitSeqNumber();
       this.online = {
         length: 0
       };
-      this.init()
+      this.init();
     }
 
     // 基础网络方法
@@ -972,20 +848,20 @@
     }
     // 发送上线广播通知
     connect() {
-      return this.send(4, '255.255.255.255', this.bport, 1, '');
+      return this.broadcast('@' + this.id);
     }
     // 下线广播
     offline() {
       if (this.online[this.id]) {
-        return this.send(4, '255.255.255.255', this.bport, 0, '-' + this.id);
+        return this.broadcast('-' + this.id);
         // this.upper.close()
       }
     }
     // 向某一个设备id发送同步类型的数据，主要是同步本设备的数据更新
-    sync(id, msg) {
+    sync(id, payload) {
       let info = (this.getOthers(id) || [])[0];
       if (info) {
-        return this.send(3, info.address, info.port, 0, msg);
+        return this.send(FD_BROAD, info.address, info.port, BROAD, payload);
       }
     }
 
@@ -993,11 +869,13 @@
 
     // 处理[SYNC数据包]设备上下线，各设备之间数据同步的功能
     _handleSync(data) {
+      let one = null
       data.message = data.message + ''
       let method = data.message[0];
-      let one = null
       data.message = data.message.slice(1);
       switch (method) {
+        case '@':
+          return this._handleLocal(data);
         case '+':
           one = this.addOnline(data.message, data.IPinfo.address, data.IPinfo.port);
           break;
@@ -1013,8 +891,25 @@
       }
       return data;
     }
+
     // 处理[LOCAL数据包]设备ip地址获取的功能
     _handleLocal(data) {
+      let one = this.addOnline(data.message, data.IPinfo.address, data.IPinfo.port);
+      if (data.message == this.id) {
+        one.id = this.id;
+        data.id = this.id;
+        data.type = "LOCAL"
+        this.$e.once("localip", one);
+        this.event.emit("onMessage", data);
+      } else {
+        // 向新上线的用户推送所有在线
+        this.sync(data.message, '+' + this.id);
+      }
+      return one;
+    }
+
+    // 处理多播情况 TODO
+    _handleMulti(data) {
       // 此时message 是当前上线的用户id
       let one = this.addOnline(data.peerId, data.IPinfo.address, data.IPinfo.port);
       // 如果是本设备
@@ -1028,6 +923,7 @@
         this.sync(data.peerId, '+' + this.id);
       }
     }
+
     // 处理来自网络的确认包
     _handleAckMessage(mtype, seq, peerInfo, message) {
       let data = {
@@ -1038,25 +934,28 @@
         iPint: utils.Ip2Int(peerInfo.address),
       };
       switch (mtype) {
-        case rMsgType['A_SYNCS']:
+        case ABROAD:
           break;
-        case rMsgType['A_LOCAL']:
+        case AMULTI:
           break;
-        case rMsgType['A_BEGIN']:
+        case ABEGIN:
           break;
-        case rMsgType['A_DOING']:
+        case ADOING:
           break;
-        case rMsgType['A_DONED']:
+        case ADONED:
+          break;
+        case ABDD:
           break;
         default:
           break;
       }
-      let event_id = peerInfo.peerId + ':' + seq
-      data.type = MsgType[mtype];
-      this.packer.del(seq);
+      let event_id = utils.Ip2Int(peerInfo.address) + ':' + seq
+      data.type = HeaderType[mtype];
+      this.seqer.del(seq);
       delete this.recver[seq];
       this.$e.emit(event_id, data);
     }
+
     // 处理来自网络的数据包
     _handleOnMessage(mtype, seq, peerInfo, message) {
       // console.log("onMessage: ", res)
@@ -1067,31 +966,33 @@
         peerId: peerInfo.peerId,
         iPint: utils.Ip2Int(peerInfo.address),
       };
-      let ack_flag = this.packer.check(seq)
+      this.seqer.check(seq)
       // 发送确认数据包
-      // if (ack_flag >= 0) {
       this.sendAck(peerInfo.address, peerInfo.port, mtype, seq);
-      // }
       if (!this.recver[seq]) {
         switch (mtype) {
-          case rMsgType['SYNCS']:
-            data.type = 'SYNCS';
+          case BROAD:
+            data.type = 'BROAD';
             this._handleSync(data);
             break;
-          case rMsgType['LOCAL']:
-            data.type = 'LOCAL';
-            this._handleLocal(data);
+          case MULTI:
+            data.type = 'MULTI';
+            this._handleMulti(data);
             break;
-          case rMsgType['BEGIN']:
+          case BEGIN:
             data.type = 'BEGIN';
             this.event.emit("onMessage", data);
             break;
-          case rMsgType['DOING']:
+          case DOING:
             data.type = 'DOING';
             this.event.emit("onMessage", data);
             break;
-          case rMsgType['DONED']:
+          case DONED:
             data.type = 'DONED';
+            this.event.emit("onMessage", data);
+            break;
+          case BDD:
+            data.type = 'BDD';
             this.event.emit("onMessage", data);
             break;
           default:
@@ -1169,47 +1070,38 @@
       }
       return one;
     }
+    // 统计工具
+    statist() {
+      let format_str = ""
+      for (let key in this.stat.props) {
+        // console.log(key, this.stat.props[key]);
+        if ('pgc' == key) {
+          format_str = format_str + "\n" + "发送数据包：" + this.stat.props[key]
+        } else if ('rpgc' == key) {
+          format_str = format_str + "\n" + "接收数据包：" + this.stat.props[key]
+        } else if ('ackpgc' == key) {
+          format_str = format_str + "\n" + "发送确认数据包：" + this.stat.props[key]
+        } else if ('rackpgc' == key) {
+          format_str = format_str + "\n" + "接收确认数据包：" + this.stat.props[key]
+        } else if ('dup' == key) {
+          format_str = format_str + "\n" + "dup值：" + this.stat.props[key]
+        } else if ('spgc' == key) {
+          format_str = format_str + "\n" + "发送小型数据包：" + this.stat.props[key]
+        } else if ('nspgc' == key) {
+          format_str = format_str + "\n" + "发送非小型数据包：" + this.stat.props[key]
+        } else if ('rspgc' == key) {
+          format_str = format_str + "\n" + "接收小型数据包：" + this.stat.props[key]
+        } else if ('rnspgc' == key) {
+          format_str = format_str + "\n" + "接收非小型数据包：" + this.stat.props[key]
+        } else if ('erpgc' == key) {
+          format_str = format_str + "\n" + "错误数据包：" + this.stat.props[key]
+        }
+      }
+      format_str = format_str.slice(1)
+      return format_str
+    }
   }
-
 
   exports.Udper = Udper;
   exports.Header = Header;
-  // 局域网最大数据包大小
-  BaseUdper.prototype.LAN_PACK_SIZE = LAN_PACK_SIZE
-  // 广域网最大数据包大小
-  BaseUdper.prototype.WAN_PACK_SIZE = WAN_PACK_SIZE
-  // 数据包消息类型
-  BaseUdper.prototype.MsgType = MsgType
-  // 数据包反消息类型
-  BaseUdper.prototype.rMsgType = rMsgType
-  // 标志位
-  // 同步数据包
-  BaseUdper.prototype.FSYNC = FSYNC
-  // 定位数据包
-  BaseUdper.prototype.FLOCAL = FLOCAL
-  // 首个数据包
-  BaseUdper.prototype.FB00 = FB00
-  // 大型数据包中间数据包
-  BaseUdper.prototype.F0D0 = F0D0
-  // 结束数据包
-  BaseUdper.prototype.F00D = F00D
-  // 既是中间数据包又是结束数据包
-  BaseUdper.prototype.F0DD = F0DD
-  // 对于小型数据, 首个数据包既是中间数据包又是最后一个数据包
-  BaseUdper.prototype.FBDD = FBDD
-  // 确认标志位
-  // 确认同步数据包
-  BaseUdper.prototype.A_SYNC = A_SYNC
-  // 确认定位数据包
-  BaseUdper.prototype.A_LOCAL = A_LOCAL
-  // 确认首个数据包
-  BaseUdper.prototype.A_B00 = A_B00
-  // 确认大型数据包中间数据包
-  BaseUdper.prototype.A_0D0 = A_0D0
-  // 确认结束数据包
-  BaseUdper.prototype.A_00D = A_00D
-  // 确认既是中间数据包又是结束数据包
-  BaseUdper.prototype.A_0DD = A_0DD
-  // 确认对于小型数据, 首个数据包既是中间数据包又是最后一个数据包
-  BaseUdper.prototype.A_BDD = A_BDD
 });

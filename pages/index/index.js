@@ -12,6 +12,15 @@ Page({
     userInfo: {},
     hasUserInfo: false,
     canIUse: wx.canIUse('button.open-type.getUserInfo'),
+    box: {
+      size: 'sm',
+      top: '200',
+      left: '200',
+      mode: 'pre',
+      template: 'box',
+      text: '',
+      style: 'width:150px;height:180px;background:rgb(0,0,0,.6)'
+    },
     list: []
   },
   //事件处理函数  
@@ -25,6 +34,7 @@ Page({
     // tree.testBinTree()
     // tree.testRBTree()
     this.onMessage("onMessage");
+    this.UdpStat();
     this.getUserInfo2().then(res => {
       this.setData(res);
     })
@@ -104,7 +114,7 @@ Page({
       console.log("event onMessage:", res)
       let msg_type = res.type
       switch (msg_type) {
-        case 'SYNCS':
+        case 'BROAD':
           wx.showToast({
             title: 'online: ' + res.online,
           })
@@ -177,4 +187,13 @@ Page({
         break
     }
   },
+  UdpStat() {
+    let self = this;
+    app.event.on('kudp-stat', this, function (res) {
+      // console.log(res);
+      self.setData({
+        ['box.text']: res
+      })
+    })
+  }
 })
