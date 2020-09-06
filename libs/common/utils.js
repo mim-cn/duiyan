@@ -15,6 +15,10 @@ const formatNumber = n => {
 }
 
 const regexIP = /\b((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/;
+
+const isIP = (ip) => {
+  return regexIP.test(ip);
+}
 /**
  * Parses IPv4 to Integer
  * @param  {String}   ip  [valid IPv4 string]
@@ -233,6 +237,7 @@ module.exports = {
   Pad: pad,
   Type: Type,
   Crc16: crc16,
+  IsIP: isIP,
   Int2Ip: int2Ip,
   Ip2Int: ip2Int,
   IsLanIP: IsLanIP,

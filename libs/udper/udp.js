@@ -447,7 +447,7 @@
         this.udper = wx.createUDPSocket();
         this.udper.bind(port);
       } catch (e) {
-        console.error(e);
+        console.error("createUDPSocket:", e);
         throw Error("create udp socket error!!!");
       }
     }
@@ -590,7 +590,6 @@
       }
     }
 
-
     // 消息处理
 
     // 接受数据时的回调
@@ -688,7 +687,7 @@
       let pkg = Package.unpack(buffer);
       // STAT 统计接收数据包个数，错误数据包个数
       pkg ? this.stat.incr('rpgc') : this.stat.incr('erpgc');
-      console.log(pkg);
+      console.log("unpack:", pkg);
       let payload = pkg.payload, mtype = pkg.header.Type(), seq = pkg.seq;
       // STAT 统计接收小型数据包个数
       (mtype === BDD) ? this.stat.incr('rspgc') : null;
@@ -711,9 +710,40 @@
           self._send(ip, port, pack.buffer)
           resolver({ err: 'ok', size: size, seq: seq, type: type, peerIp: ip, peerPort: port });
         } catch (e) {
-          console.error(e);
+          console.error("sendAck:", e);
           reject(e);
         }
+      });
+    }
+
+    // 定时器超时重传
+    retry(seq, type, ip, port, pack) {
+      let self = this;
+      // 设置超时定时器
+      let intervalID = setInterval(function () {
+        console.log('retry send', type, ip, port, pack)
+        // STAT 统计接重复发送数据包个数
+        if (self.stat.incr('dup') < RETRY) {
+          // 添加dup标志
+          pack.setFlags(1, 0, 0);
+          self.stat.incr('pgc');
+          // STAT 统计接收小型数据包个数(dup)
+          (pack.header.Type() === BDD) ? self.stat.incr('spgc') : null;
+          // STAT 统计接收非小型数据包个数(dup)
+          (pack.header.Type() === BEGIN) ? self.stat.incr('nspgc') : null;
+          self._send(ip, port, pack.buffer)
+        } else {
+          clearInterval(intervalID);
+          delete self.timer[seq];
+        }
+      }, ACK_TIMEOUT);
+      self.timer[seq] = { ip: ip, seq: seq, id: intervalID }
+      // 定义事件通知
+      let event_id = utils.Ip2Int(ip) + ':' + seq;
+      self.$e.on1(event_id, self, res => {
+        console.log('ack:', res);
+        clearInterval(intervalID);
+        delete self.timer[seq];
       });
     }
 
@@ -727,37 +757,13 @@
           let { seq, size, type, pack } = self.encode(fd, mtype, null, payload, PACK_SIZE);
           // TODO: 广播，多播 是否需要重传？
           if (type > MULTI) {
-            // 设置超时定时器
-            let intervalID = setInterval(function () {
-              console.log('retry send', type, ip, port, pack)
-              // STAT 统计接重复发送数据包个数
-              if (self.stat.incr('dup') < RETRY) {
-                pack.setFlags(1, 0, 0);
-                self.stat.incr('pgc');
-                // STAT 统计接收小型数据包个数(dup)
-                (pack.header.Type() === BDD) ? self.stat.incr('spgc') : null;
-                // STAT 统计接收非小型数据包个数(dup)
-                (pack.header.Type() === BEGIN) ? self.stat.incr('nspgc') : null;
-                self._send(ip, port, pack.buffer)
-              } else {
-                clearInterval(intervalID);
-                delete self.timer[seq];
-              }
-            }, ACK_TIMEOUT);
-            self.timer[seq] = { ip: ip, seq: seq, id: intervalID, }
-            // 定义事件通知
-            let event_id = utils.Ip2Int(ip) + ':' + seq
-            self.$e.on1(event_id, self, res => {
-              console.log('ack:', res);
-              clearInterval(intervalID);
-              delete self.timer[seq];
-            });
+            self.retry(seq, type, ip, port, pack);
           }
           // 调用发送
-          self._send(ip, port, pack.buffer)
+          self._send(ip, port, pack.buffer);
           resolver({ err: 'ok', size: size, seq: seq, type: type, peerIp: ip, peerPort: port });
         } catch (e) {
-          console.error(e);
+          console.error("send:", e);
           reject(e);
         }
       });
@@ -766,11 +772,16 @@
     // 通过id发送mtype消息的数据data
     sendById(fd, id, payload) {
       let self = this;
-      let info = self.getOthers(id) || [];
-      if (id && info.length > 0) {
-        let fstat = self.fstat(fd);
-        fstat.ip = info[0].address
-        fstat.port = info[0].port
+      let info = []
+      if (utils.IsIP(id)) {
+        info = [{ address: id, port: this.bport }];
+      } else {
+        info = self.getOthers(id) || [];
+        if (id && info.length > 0) {
+          let fstat = self.fstat(fd);
+          fstat.ip = info[0].address
+          fstat.port = info[0].port
+        }
       }
       return Promise.all(info.map((item) => {
         return self.send(fd, item.address, item.port, BEGIN, payload);

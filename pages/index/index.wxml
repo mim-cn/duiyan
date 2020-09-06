@@ -22,7 +22,7 @@
 		</view>
 		<form>
 			<view class="cu-form-group">
-				<view class="title">ID：</view>
+				<view class="title">ID/P：</view>
 				<input placeholder="请输入对方id" bindblur="inputId"></input>
 			</view>
 			<view class="cu-form-group margin-top-sm">

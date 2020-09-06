@@ -1,5 +1,6 @@
 //app.js
 const Udper = require('./libs/udper/udp.js').Udper
+// const Header = require('./libs/udper/udp.js').Header
 import event from './libs/common/event.js'
 const BPORT = 5328
 
@@ -80,21 +81,23 @@ App({
       }
     })
     this.event = event;
+    // Header.testHeader();
     this.udper = new Udper(BPORT, this.event)
     wx.onAppShow((result) => {
-      console.log(result)
+      console.log("onAppShow:", result)
     })
     wx.onAppHide((res) => {
-      console.log(res)
+      console.log("onAppHide:", res)
     })
   },
   onError: function (msg) {
-    console.error(msg)
+    console.error("onError", msg)
     if (this.udper) {
       this.udper.close()
     }
   },
   globalData: {
-    userInfo: null
+    userInfo: null,
+    bport: BPORT
   },
 })

@@ -19,7 +19,7 @@ Page({
       mode: 'pre',
       template: 'box',
       text: '',
-      style: 'width:150px;height:180px;background:rgb(0,0,0,.6)'
+      style: 'width:150px;height:180px;background:rgb(0,0,0,.5)'
     },
     list: []
   },
@@ -70,7 +70,7 @@ Page({
     })
   },
   getUserInfo: function (e) {
-    console.log(e)
+    console.log("getUserInfo:", e)
     app.globalData.userInfo = e.detail.userInfo
     this.setData({
       userInfo: e.detail.userInfo,
@@ -87,11 +87,10 @@ Page({
   },
   bindSend: function (e) {
     let id = this.data.peerId
-    let ip = this.data.peerIp
     let msg = this.data.msg
     let fd = udper.open()
     udper.sendById(fd, id, msg).then(res => {
-      console.log(res)
+      console.log("sendById:", res)
       udper.close(fd)
     }).catch(e => {
       wx.showToast({
