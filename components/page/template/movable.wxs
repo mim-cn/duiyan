@@ -1,0 +1,42 @@
+var startX = 0
+var startY = 0
+var lastLeft = lastTop = 0
+
+function touchstart(event, ins) {
+  var touch = event.touches[0] || event.changedTouches[0]
+  startX = touch.pageX
+  startY = touch.pageY
+  console.log("touchstart:", startX, startY)
+  ins.callMethod('onClickMovable', {
+    complete: function (res) {
+      console.log('args', res)
+    }
+  })
+}
+
+function touchmove(event, ins) {
+  var touch = event.touches[0] || event.changedTouches[0]
+  var pageX = touch.pageX
+  var pageY = touch.pageY
+  var deltaX = pageX - startX
+  var deltaY = pageY - startY
+  var mbleft = deltaX + lastLeft
+  var mbtop = deltaY + lastTop
+  startX = pageX
+  startY = pageY
+  lastLeft = mbleft
+  lastTop = mbtop
+  // console.log(deltaX, deltaY)
+  if (Math.abs(deltaX) > 1.5 || Math.abs(deltaY) > 1.5) {
+    ins.selectComponent('.movable').setStyle({
+      left: mbleft + 'px',
+      top: mbtop + 'px'
+    })
+  }
+  return false
+}
+
+module.exports = {
+  touchstart: touchstart,
+  touchmove: touchmove,
+}
