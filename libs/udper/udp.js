@@ -47,7 +47,7 @@
   const IDMAX = Math.pow(10, IDLEN)
   const RIGHT_MOVE = 11
   const ISN_INTERVAL = 1 << RIGHT_MOVE  // 2048
-
+  const MAX_SEQ = (-1 >>> 32) + 1
   const EXPIRE = 60000 // 60s
 
   // 重传机制超时时间
@@ -58,15 +58,6 @@
   const WAN_PACK_SIZE = 512
   // 重试次数
   const RETRY = 100
-
-  const getInitSeqNumber = (x) => {
-    let startISN = function (x) {
-      return Math.floor(x >>> RIGHT_MOVE);
-    }(x || 0)
-    // 保证每次生成的数字间隔最小 ISN_INTERVAL
-    startISN = (startISN + 1) * ISN_INTERVAL;
-    return parseInt(utils.RandomNum(startISN, (-1 >>> 32)))
-  }
 
   /**
    * 1. 一段时间内UDP传输过程中的seq资源的分配、消费管理；
@@ -84,28 +75,108 @@
        *     必须从 152122 + 2048 = 154170开始分配
        */
       this.data = {}
+      this.stat = new Stat();
+      this.segment = [[0, MAX_SEQ + 1]];
     }
 
     // 一个新的数据包发送，申请一个新的isn
     malloc(size) {
-      this.isn = getInitSeqNumber(this.isn);
-      this.data[this.isn] = {};
-      size = size || 2048;
-      // 待确认的seq
-      this.data[this.isn]['ack'] = [this.isn];
-      // seq区段大小
-      this.data[this.isn]['length'] = size;
-      // isn段的起始
-      this.data[this.isn]['isn'] = this.isn
-      // 最后一个seq的前一个，(左闭右开]
-      this.data[this.isn]['last'] = this.isn + size;
-      // 下一个可以使用的seq
-      this.data[this.isn]['next'] = this.isn + 1;
-      return this.isn;
+      size = size || ISN_INTERVAL;
+      let { isn, index } = this.getInitSeqNumber(size) || [-1, -1];
+      if (isn > -1 && -1 === this.check(isn)) {
+        this.isn = isn;
+        this.data[this.isn] = {};
+        // 待确认的seq
+        this.data[this.isn]['ack'] = [this.isn];
+        if (size > 1) {
+          // this.data[this.isn]['index'] = index;
+          // seq区段大小
+          this.data[this.isn]['length'] = size;
+          // isn段的起始
+          this.data[this.isn]['isn'] = this.isn
+          // 最后一个seq的前一个，(左闭右开]
+          this.data[this.isn]['last'] = this.isn + size;
+          // 下一个可以使用的seq
+          this.data[this.isn]['cursor'] = this.isn + 1;
+        }
+      }
+      return isn;
+    }
+
+    insert(dst, pos, src) {
+      src.unshift(pos, 0);
+      Array.prototype.splice.apply(dst, src);
+      return dst;
+    }
+
+    getInitSeqNumber(size) {
+      let cnt = 0;
+      let seq = null;
+      let index = null;
+      var segment = null;
+      let len = this.segment.length
+      while (cnt < len) {
+        // TODO： 是否需要随机
+        index = utils.RandomNum(0, len)
+        // 不满足需要的size大小的段
+        if (this.segment[index][1] - this.segment[index][0] < size) {
+          cnt++;
+        } else {
+          segment = this.segment[index];
+          break;
+        }
+      }
+      // 遍历了所有的段，没有找到合适可以切割段，说明无法再次分配足够的空间
+      if (cnt >= len && null == segment) {
+        return { isn: -1, index: -1 };
+      }
+      let segment_tb = []
+      seq = parseInt(utils.RandomNum(segment[0], segment[1] - size))
+      if (segment[0] === seq) {
+        segment_tb = [[segment[0] + size, segment[1]]]
+      } else if (seq + size === segment[1]) {
+        segment_tb = [[segment[0], segment[1] - size]]
+      } else {
+        segment_tb = [[segment[0], seq], [seq + size, segment[1]]]
+      }
+      // 更新可用的区间段
+      this.segment.splice(index, 1);
+      this.segment = this.insert(this.segment, index, segment_tb);
+      this.stat.set('sgcnt', this.segment.length);
+      return { isn: seq, index: index };
     }
 
     // 数据包确认后，即时释放和清除
     free(isn) {
+      if (-1 === isn) {
+        return
+      }
+      let index = 0;
+      let isn_info = this.data[isn];
+      // 针对单个seq的
+      let start = isn_info['isn'] || isn;
+      let last = isn_info['last'] || isn + 1;
+      let len = this.segment.length;
+      for (let i = 0; i < len; i++) {
+        let segment = this.segment[i];
+        if (segment[1] == start) {
+          // merge 可用段
+          segment[1] = last;
+          index = i;
+          break;
+        }
+      }
+      for (let i = index; ; i++) {
+        let cur = this.segment[i];
+        let nxt = this.segment[i + 1];
+        // 越界检测
+        if (!nxt) { break; }
+        if (cur[1] == nxt[0]) {
+          cur[1] = nxt[1];
+          this.segment.splice(index + 1, 1);
+        }
+      }
+      this.stat.set('sgcnt', this.segment.length);
       delete this.data[isn]
     }
 
@@ -114,10 +185,13 @@
       // TODO，超过length的处理
       // 1. 动态分配
       // 2. 主动释放之前有的需要，且再次同一个isn下复用
-      let seq = this.data[isn]['next']++
-      // 写入一个待确认的seq
-      this.data[isn]['ack'].push(seq)
-      return seq
+      if (isn > -1 && this.data[isn]['cursor']) {
+        let seq = this.data[isn]['cursor']++
+        // 写入一个待确认的seq
+        this.data[isn]['ack'].push(seq)
+        return seq
+      }
+      return -1;
     }
 
     // 从一个isn, 删除已确认的数据包seq
@@ -163,6 +237,23 @@
       }
       return has == false ? -1 : 0
     }
+    //
+    info(isn) {
+      return this.data[isn];
+    }
+    static testSeqManage() {
+      let seqm = new SeqManage();
+      let isn = 0;
+      var i = 0;
+      while (isn != -1 && ++i < 1000) {
+        isn = seqm.malloc(utils.RandomNum(1, 1024));
+        console.log(seqm.info(isn));
+        // let seq = seqm.get(isn)
+        i % 50 ? seqm.free(isn) : null;
+        // console.log(i, seq, seqm.info(isn));
+      }
+      console.log(isn)
+    }
   }
 
   class Stat {
@@ -174,6 +265,9 @@
     }
     decr(key) {
       return this.props[key] ? this.props[key]-- : this.props[key] = 0;
+    }
+    set(key, val) {
+      return this.props[key] ? this.props[key] = val || 0 : this.props[key] = val || 0;
     }
   }
 
@@ -652,6 +746,9 @@
           // 首个数据包，将申请一个新的isn
           if (!isn) {
             seq = this.seqer.malloc();
+            if (-1 === seq) {
+              throw new Error("malloc seq error");
+            }
             fstat['isn'] = seq;
             // 消息数据包（小于PACK_SIZE），只用占用一个数据包
             if (size <= max_size) {
@@ -673,6 +770,9 @@
         case BROAD:
         case MULTI:
           seq = this.seqer.malloc(1);
+          if (-1 === seq) {
+            throw new Error("malloc seq error");
+          }
           fstat['isn'] = seq;
           break;
         default:
@@ -1012,6 +1112,7 @@
             break;
         }
         this.recver[seq] = data
+        this.seqer.free(seq);
       }
       console.info("online", this.online);
       console.info("current", this);
@@ -1115,4 +1216,5 @@
 
   exports.Udper = Udper;
   exports.Header = Header;
+  exports.SeqManage = SeqManage;
 });

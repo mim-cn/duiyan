@@ -85,7 +85,7 @@ const int2Ip = (value) => {
  * @param {Number} upper 
  */
 const randomNum = (lower, upper) => {
-  return Math.floor(Math.random() * (upper - lower)) + lower;
+  return lower <= upper ? Math.floor(Math.random() * (upper - lower)) + lower : -1;
 }
 
 /**
