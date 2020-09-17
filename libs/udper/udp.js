@@ -43,6 +43,7 @@
     Messge
   } = require("./message");
 
+  const SEP = ':'
   const IDLEN = 5
   const IDMAX = Math.pow(10, IDLEN)
   const RIGHT_MOVE = 11
@@ -51,7 +52,7 @@
   const EXPIRE = 60000 // 60s
 
   // 重传机制超时时间
-  const ACK_TIMEOUT = 2000
+  const ACK_TIMEOUT = 400
   // 局域网最大数据包大小
   const LAN_PACK_SIZE = 1024
   // 广域网最大数据包大小
@@ -198,9 +199,13 @@
     del(seq) {
       let isn = this.location(seq);
       let isn_info = this.data[isn] || { ack: [] }
-      let index = isn_info['ack'].indexOf(seq)
-      if (index >= 0) {
-        return this.data[isn]['ack'].splice(index, 1)
+      if (isn_info['length']) {
+        let index = isn_info['ack'].indexOf(seq);
+        if (index >= 0) {
+          return this.data[isn]['ack'].splice(index, 1)
+        }
+      } else {
+        this.free(seq);
       }
       return null
     }
@@ -385,6 +390,9 @@
     }
     Ack() {
       return (this.bits & 0x80) >>> 7;
+    }
+    IsFin() {
+      return (BDD === this.Type() || DONED === this.Type())
     }
     // 获取header信息
     info() {
@@ -617,6 +625,12 @@
         this.udper.offMessage(function () { });
       });
     }
+    onMessage() {
+      let self = this;
+      self.udper.onMessage(function (res) {
+        self.onMessageHandler(res);
+      });
+    }
   }
 
   // 基于wx.UDPSocket的基础类
@@ -687,16 +701,13 @@
     // 消息处理
 
     // 接受数据时的回调
-    onMessage() {
-      let self = this;
-      self.udper.onMessage(function (res) {
-        let { mtype, seq, peerInfo, data } = self.decode(res.remoteInfo, res.message);
-        if (mtype < ABROAD) {
-          self._handleOnMessage(mtype, seq, peerInfo, data)
-        } else {
-          self._handleAckMessage(mtype, seq, peerInfo, data)
-        }
-      });
+    onMessageHandler(res) {
+      let { mtype, seq, peerInfo, data } = this.decode(res.remoteInfo, res.message);
+      if (mtype < ABROAD) {
+        this._handleOnMessage(mtype, seq, peerInfo, data)
+      } else {
+        this._handleAckMessage(mtype, seq, peerInfo, data)
+      }
     }
 
     // 传输管理
@@ -796,6 +807,10 @@
       // STAT 统计接收非小型数据包个数
       (mtype >= ABROAD) ? this.stat.incr('rackpgc') : null;
       this.event.emit("kudp-stat", this.statist());
+      // ip对应的数字
+      peer.ipint = utils.Ip2Int(peer.address);
+      // 来自ip的序号位seq的数据包。唯一标识
+      peer.ipseq = peer.ipint + SEP + seq;
       return { mtype: mtype, seq: seq, peerInfo: (peer || {}), data: payload }
     }
 
@@ -819,6 +834,7 @@
     // 定时器超时重传
     retry(seq, type, ip, port, pack) {
       let self = this;
+      let event_id = utils.Ip2Int(ip) + SEP + seq;
       // 设置超时定时器
       let intervalID = setInterval(function () {
         console.log('retry send', type, ip, port, pack)
@@ -834,16 +850,15 @@
           self._send(ip, port, pack.buffer)
         } else {
           clearInterval(intervalID);
-          delete self.timer[seq];
+          delete self.timer[event_id];
         }
       }, ACK_TIMEOUT);
-      self.timer[seq] = { ip: ip, seq: seq, id: intervalID }
-      // 定义事件通知
-      let event_id = utils.Ip2Int(ip) + ':' + seq;
+      self.timer[event_id] = { ip: ip, seq: seq, id: intervalID }
+      // 定义事件通知      
       self.$e.on1(event_id, self, res => {
         console.log('ack:', res);
         clearInterval(intervalID);
-        delete self.timer[seq];
+        delete self.timer[event_id];
       });
     }
 
@@ -1041,9 +1056,9 @@
         seq: seq,
         message: message,
         IPinfo: peerInfo,
-        peerId: peerInfo.peerId,
-        iPint: utils.Ip2Int(peerInfo.address),
+        iPint: peerInfo.ipint,
       };
+      // 针对数据包不同类型特殊处理
       switch (mtype) {
         case ABROAD:
           break;
@@ -1060,11 +1075,19 @@
         default:
           break;
       }
-      let event_id = utils.Ip2Int(peerInfo.address) + ':' + seq
+      // 删除发送窗口中的分配的序号
+      if(this.seqer.location(seq)){
+        if (BDD === mtype || DONED === mtype) {
+          this.seqer.free(seq);
+        } else {
+          this.seqer.del(seq);
+        }
+      }
+      // 释放接收窗口中的来自指定peer的序号
+      delete this.recver[peerInfo.ipseq];
+      // 通知超时定时器删除超时动作
       data.type = HeaderType[mtype];
-      this.seqer.del(seq);
-      delete this.recver[seq];
-      this.$e.emit(event_id, data);
+      this.$e.emit(peerInfo.ipseq, data);
     }
 
     // 处理来自网络的数据包
@@ -1074,13 +1097,12 @@
         seq: seq,
         message: message,
         IPinfo: peerInfo,
-        peerId: peerInfo.peerId,
-        iPint: utils.Ip2Int(peerInfo.address),
+        iPint: peerInfo.ipint,
       };
-      this.seqer.check(seq)
+      // this.seqer.check(seq)
       // 发送确认数据包
       this.sendAck(peerInfo.address, peerInfo.port, mtype, seq);
-      if (!this.recver[seq]) {
+      if (!this.recver[peerInfo.ipseq]) {
         switch (mtype) {
           case BROAD:
             data.type = 'BROAD';
@@ -1111,8 +1133,9 @@
             this.event.emit("onMessage", data);
             break;
         }
-        this.recver[seq] = data
-        this.seqer.free(seq);
+        this.recver[peerInfo.ipseq] = data
+        // console.info("seqer:", this.seqer, seq, mtype);
+        // this.seqer.free(seq);
       }
       console.info("online", this.online);
       console.info("current", this);
