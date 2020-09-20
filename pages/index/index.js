@@ -89,8 +89,8 @@ Page({
     let id = this.data.peerId
     let msg = this.data.msg
     let fd = udper.open()
-    udper.sendById(fd, id, msg).then(res => {
-      console.log("sendById:", res)
+    udper.sendTo(fd, id, msg).then(res => {
+      console.log("sendTo:", res)
       udper.close(fd)
     }).catch(e => {
       wx.showToast({
