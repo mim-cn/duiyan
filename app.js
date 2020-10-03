@@ -1,7 +1,7 @@
 //app.js
-const Udper = require('./libs/udper/udp.js').Udper
-// const Header = require('./libs/udper/udp.js').Header
-import event from './libs/common/event.js'
+const kudp = require('./libs/kudp/udp.js').kudp
+// const Header = require('./libs/kudp/udp.js').Header
+import event from './libs/event/event.js'
 const BPORT = 5328
 
 // 检测更新
@@ -82,7 +82,7 @@ App({
     })
     this.event = event;
     // Header.testHeader();
-    this.udper = new Udper(BPORT, this.event)
+    this.udper = new kudp(BPORT, this.event)
     wx.onAppShow((result) => {
       console.log("onAppShow:", result)
     })
