@@ -1,10 +1,8 @@
 //index.js
-//index.js
 import Page from '../../components/page/page';
 //获取应用实例
 const app = getApp()
 const udper = app.udper
-const dber = require('../../libs/dbjs/dber')
 
 Page({
   data: {
@@ -30,9 +28,6 @@ Page({
     })
   },
   onLoad: function () {
-    // dber.getTestDB()
-    // tree.testBinTree()
-    // tree.testRBTree()
     this.onMessage("onMessage");
     this.UdpStat();
     this.getUserInfo2().then(res => {
@@ -86,17 +81,15 @@ Page({
     }
   },
   bindSend: function (e) {
-    let id = this.data.peerId
+    let ip = this.data.peerId
     let msg = this.data.msg
-    let fd = udper.open()
-    udper.sendTo(fd, id, msg).then(res => {
-      console.log("sendTo:", res)
-      udper.close(fd)
-    }).catch(e => {
-      wx.showToast({
-        title: e.err,
-      })
-    })
+    // msg = msg.repeat(1000);
+    let fd = udper.open();
+    if (ip && msg) {
+      let size = udper.sendTo(fd, msg, ip, app.globalData.bport);
+    } else {
+      wx.showToast({ title: "参数错误！", })
+    }
   },
   inputId: function (e) {
     this.setData({
@@ -150,13 +143,7 @@ Page({
       title: '加载中....',
       icon: 'loading'
     });
-    udper.getLocalip(true).then(res => {
-      if (res) {
-        self.setData({
-          motto: res.id + "@" + res.address
-        })
-      }
-    })
+    udper.getLocalip(true);
     setTimeout(function () {
       wx.stopPullDownRefresh();
       wx.hideToast({

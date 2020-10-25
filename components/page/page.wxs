@@ -229,7 +229,7 @@ function touchend(e, ins) {
 }
 
 function touchcancel(e, ins) {
-  console.log(JSON.stringify(e), JSON.stringify(ins))
+  // console.log(JSON.stringify(e), JSON.stringify(ins))
 }
 
 /**

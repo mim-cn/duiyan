@@ -6,7 +6,7 @@ function touchstart(event, ins) {
   var touch = event.touches[0] || event.changedTouches[0]
   startX = touch.pageX
   startY = touch.pageY
-  console.log("touchstart:", startX, startY)
+  // console.log("touchstart:", startX, startY)
   ins.callMethod('onClickMovable', {
     complete: function (res) {
       console.log('args', res)
