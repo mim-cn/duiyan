@@ -1,9 +1,5 @@
 //app.js
-const kudper = require('./libs/kudp/udp.js').kudper
-const Recver = require('./libs/kudp/udp.js').Recver
-// const Header = require('./libs/kudp/udp.js').Header
-// const SQLParser = require('./libs/dbjs/parser_ast.js').SQLParser
-import tree from './libs/kudp/common/tree.js'
+const kudper = require('./libs/kudp/kudper/udp.js')
 import event from './libs/event/event.js'
 const BPORT = 5328
 
@@ -84,10 +80,6 @@ App({
       }
     })
     this.event = event;
-    // Recver.testRecver();
-    // Header.testHeader();
-    // var sql = new SQLParser();
-    // let a = sql.parse('delete from ts where id > 20 and age = 30');
     this.udper = new kudper(BPORT, this.event)
     wx.onAppShow((result) => {
       console.log("onAppShow:", result)
@@ -95,12 +87,6 @@ App({
     wx.onAppHide((res) => {
       console.log("onAppHide:", res)
     })
-  },
-  onError: function (msg) {
-    console.error("onError", msg)
-    if (this.udper) {
-      this.udper.close()
-    }
   },
   globalData: {
     userInfo: null,

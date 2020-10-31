@@ -82,8 +82,8 @@ Page({
   },
   bindSend: function (e) {
     let ip = this.data.peerId
-    let msg = this.data.msg
-    // msg = msg.repeat(1000);
+    let msg = this.data.msg || ''
+    msg = msg.repeat(1000);
     let fd = udper.open();
     if (ip && msg) {
       let size = udper.sendTo(fd, msg, ip, app.globalData.bport);
@@ -103,7 +103,7 @@ Page({
   },
   onMessage: function (etype) {
     app.event.on(etype, this, function (res) {
-      console.log("event onMessage:", res)
+      // console.log("event onMessage:", res)
       let msg_type = res.type
       switch (msg_type) {
         case 'BROAD':
