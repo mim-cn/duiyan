@@ -1,10 +1,8 @@
 //index.js
-//index.js
 import Page from '../../components/page/page';
 //获取应用实例
 const app = getApp()
 const udper = app.udper
-const dber = require('../../libs/dbjs/dber')
 
 Page({
   data: {
@@ -12,6 +10,15 @@ Page({
     userInfo: {},
     hasUserInfo: false,
     canIUse: wx.canIUse('button.open-type.getUserInfo'),
+    box: {
+      size: 'sm',
+      top: '200',
+      left: '200',
+      mode: 'pre',
+      template: 'box',
+      text: '',
+      style: 'width:150px;height:180px;background:rgb(0,0,0,.5)'
+    },
     list: []
   },
   //事件处理函数  
@@ -21,10 +28,8 @@ Page({
     })
   },
   onLoad: function () {
-    // dber.getTestDB()
-    // tree.testBinTree()
-    // tree.testRBTree()
     this.onMessage("onMessage");
+    this.UdpStat();
     this.getUserInfo2().then(res => {
       this.setData(res);
     })
@@ -60,7 +65,7 @@ Page({
     })
   },
   getUserInfo: function (e) {
-    console.log(e)
+    console.log("getUserInfo:", e)
     app.globalData.userInfo = e.detail.userInfo
     this.setData({
       userInfo: e.detail.userInfo,
@@ -76,18 +81,15 @@ Page({
     }
   },
   bindSend: function (e) {
-    let id = this.data.peerId
-    let ip = this.data.peerIp
-    let msg = this.data.msg
-    let fd = udper.open()
-    udper.sendById(fd, id, msg).then(res => {
-      console.log(res)
-      udper.close(fd)
-    }).catch(e => {
-      wx.showToast({
-        title: e.err,
-      })
-    })
+    let ip = this.data.peerId
+    let msg = this.data.msg || ''
+    msg = msg.repeat(1000);
+    let fd = udper.open();
+    if (ip && msg) {
+      let size = udper.sendTo(fd, msg, ip, app.globalData.bport);
+    } else {
+      wx.showToast({ title: "参数错误！", })
+    }
   },
   inputId: function (e) {
     this.setData({
@@ -101,10 +103,10 @@ Page({
   },
   onMessage: function (etype) {
     app.event.on(etype, this, function (res) {
-      console.log("event onMessage:", res)
+      // console.log("event onMessage:", res)
       let msg_type = res.type
       switch (msg_type) {
-        case 'SYNCS':
+        case 'BROAD':
           wx.showToast({
             title: 'online: ' + res.online,
           })
@@ -141,13 +143,7 @@ Page({
       title: '加载中....',
       icon: 'loading'
     });
-    udper.getLocalip(true).then(res => {
-      if (res) {
-        self.setData({
-          motto: res.id + "@" + res.address
-        })
-      }
-    })
+    udper.getLocalip(true);
     setTimeout(function () {
       wx.stopPullDownRefresh();
       wx.hideToast({
@@ -177,4 +173,13 @@ Page({
         break
     }
   },
+  UdpStat() {
+    let self = this;
+    app.event.on('kudp-stat', this, function (res) {
+      // console.log(res);
+      self.setData({
+        ['box.text']: res
+      })
+    })
+  }
 })

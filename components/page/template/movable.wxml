@@ -1,0 +1,13 @@
+<wxs src="./movable.wxs" module="movable"></wxs>
+
+<template name="box">
+	<view class="padding-sm radius text-content text-{{mode||'pre'}} text-{{size||'xs'}} text-{{color||'white'}}" style="{{style}}">{{text}}</view>
+</template>
+
+<template name="movable">
+	<view bindtouchstart="{{movable.touchstart}}" bindtouchmove="{{movable.touchmove}}" bindtouchend='{{movable.touchmove}}' style='position:absolute;z-index:1025;left:{{left}}rpx;top:{{top}}rpx'>
+		<view class="movable" style="position:absolute;left:{{mbleft}}px;top:{{mbtop}}px">
+			<template is="{{template}}" data="{{text: text, mode: mode, color: color, size: size, style: style}}"></template>
+		</view>
+	</view>
+</template>

@@ -1,6 +1,7 @@
 <!--index.wxml-->
 <wxs src="../../components/page/page.wxs" module="page"></wxs>
 <import src="../../components/page/template/list.wxml" />
+<import src="../../components/page/template/movable.wxml" />
 
 <cu-custom bgColor="bg-gradual-blue" isCustom="{{true}}" Left="list" Right="refresh" data-target="modalLeft" bindleft="showModal" bindright="onRefresh">
 	<view slot="content">对眼</view>
@@ -21,7 +22,7 @@
 		</view>
 		<form>
 			<view class="cu-form-group">
-				<view class="title">ID：</view>
+				<view class="title">ID/P：</view>
 				<input placeholder="请输入对方id" bindblur="inputId"></input>
 			</view>
 			<view class="cu-form-group margin-top-sm">
@@ -33,6 +34,7 @@
 			<button class="cu-btn bg-green margin-tb-sm lg" bindtap="bindSend">发送</button>
 		</view>
 		<template is="modal" data="{{list: list, id:'modal1', show: show, CustomBar:CustomBar, StatusBar:StatusBar,ScreenWidth:ScreenWidth,ScreenHeight:ScreenHeight}}"></template>
+		<template is="movable" data="{{... box}}"></template>
 	</view>
 	<view class="cu-load pull-up text-gray {{enablePullUpRefresh?(enablePullUpRefresh.isover==1)?'over':(enablePullUpRefresh.isover && enablePullUpRefresh.isover==0?'':'loading'): ''}} "></view>
 	<view wx:if="{{tabbar}}" class="cu-tabbar-height"></view>

@@ -1,6 +1,6 @@
 //app.js
-const Udper = require('./libs/udper/udp.js').Udper
-import event from './libs/common/event.js'
+const kudper = require('./libs/kudp/kudper/udp.js')
+import event from './libs/event/event.js'
 const BPORT = 5328
 
 // 检测更新
@@ -80,21 +80,16 @@ App({
       }
     })
     this.event = event;
-    this.udper = new Udper(BPORT, this.event)
+    this.udper = new kudper(BPORT, this.event)
     wx.onAppShow((result) => {
-      console.log(result)
+      console.log("onAppShow:", result)
     })
     wx.onAppHide((res) => {
-      console.log(res)
+      console.log("onAppHide:", res)
     })
   },
-  onError: function (msg) {
-    console.error(msg)
-    if (this.udper) {
-      this.udper.close()
-    }
-  },
   globalData: {
-    userInfo: null
+    userInfo: null,
+    bport: BPORT
   },
 })
